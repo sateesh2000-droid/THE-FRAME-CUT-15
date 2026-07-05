@@ -1,0 +1,23 @@
+{
+  "entities": {
+    "projects": {
+      "title": "Projects",
+      "description": "Wedding projects and movie specs managed by editors",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectName": { "type": "string" },
+        "brideName": { "type": "string" },
+        "groomName": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "projectName"]
+    }
+  },
+  "firestore": {
+    "projects/{projectId}": {
+      "schema": "projects",
+      "description": "Wedding projects collection"
+    }
+  }
+}
