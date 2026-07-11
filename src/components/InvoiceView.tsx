@@ -21,6 +21,12 @@ import Logo from './Logo';
 import { jsPDF } from 'jspdf';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 
+interface ReceivedPayment {
+  id: string;
+  amount: number;
+  receivedFrom: string;
+}
+
 interface InvoiceViewProps {
   projects: Project[];
   studios: Studio[];
@@ -45,6 +51,44 @@ export default function InvoiceView({
   const [upiId, setUpiId] = useState<string>('');
   const [paymentLink, setPaymentLink] = useState<string>('');
   const [qrType, setQrType] = useState<'upi' | 'link'>('upi');
+
+  const [showPaymentsManager, setShowPaymentsManager] = useState<boolean>(true);
+  const [newPaymentAmount, setNewPaymentAmount] = useState<number>(0);
+  const [newPaymentFrom, setNewPaymentFrom] = useState<string>('');
+  const [receivedPayments, setReceivedPayments] = useState<ReceivedPayment[]>([
+    { id: 'pay-1', amount: 25000, receivedFrom: 'Bunty Bhaiya' },
+    { id: 'pay-2', amount: 20000, receivedFrom: 'Kunal Bhaiya' },
+    { id: 'pay-3', amount: 10000, receivedFrom: 'Bunty Bhaiya' },
+    { id: 'pay-4', amount: 20000, receivedFrom: 'Bunty Bhaiya' },
+    { id: 'pay-5', amount: 20000, receivedFrom: 'Bunty Bhaiya' },
+    { id: 'pay-6', amount: 10000, receivedFrom: 'Kunal Bhaiya' },
+    { id: 'pay-7', amount: 15000, receivedFrom: 'Kunal Bhaiya' },
+  ]);
+
+  const handleAddPayment = () => {
+    if (!newPaymentFrom.trim()) {
+      triggerToast("Missing Info", "Please enter the person's name who made the payment.", "info");
+      return;
+    }
+    if (newPaymentAmount <= 0) {
+      triggerToast("Invalid Amount", "Please enter a valid payment amount greater than 0.", "info");
+      return;
+    }
+    const newPay: ReceivedPayment = {
+      id: `pay-${Date.now()}`,
+      amount: newPaymentAmount,
+      receivedFrom: newPaymentFrom.trim()
+    };
+    setReceivedPayments([...receivedPayments, newPay]);
+    setNewPaymentAmount(0);
+    setNewPaymentFrom('');
+    triggerToast("Payment Added", `Added payment of ₹${newPay.amount.toLocaleString('en-IN')} from ${newPay.receivedFrom}!`);
+  };
+
+  const handleRemovePayment = (id: string) => {
+    setReceivedPayments(receivedPayments.filter(p => p.id !== id));
+    triggerToast("Payment Removed", "Payment entry deleted from statement ledger.");
+  };
   
   // Custom Toast and confirmation state
   const [invoiceToDeleteId, setInvoiceToDeleteId] = useState<string | null>(null);
@@ -106,8 +150,8 @@ export default function InvoiceView({
   const gstRate = 0.18; // 18% GST for services
   const gstAmount = includeGst ? Math.round((subtotal - discount) * gstRate) : 0;
   const totalAmount = subtotal - discount + gstAmount;
-  // User requested to remove Advance Paid from Invoice, so displayed balance due is the total amount
-  const balanceDue = totalAmount;
+  const totalPaymentsReceived = receivedPayments.reduce((sum, p) => sum + p.amount, 0);
+  const balanceDue = Math.max(0, totalAmount - totalPaymentsReceived);
 
   const getQrCodeData = () => {
     if (qrType === 'upi' && upiId) {
@@ -427,6 +471,83 @@ export default function InvoiceView({
       currentY += rowHeight;
     });
 
+    if (receivedPayments.length > 0) {
+      if (currentY > 180) {
+        drawFooterOnPage(doc, currentPageNum, false);
+        doc.addPage();
+        currentPageNum++;
+        drawWatermarkOnPDFPage(doc);
+        currentY = 32;
+      } else {
+        currentY += 8;
+      }
+
+      // Draw Payments Header
+      doc.setFillColor('#ECFDF5'); // soft light emerald background
+      doc.rect(15, currentY - 5, 180, 8, 'F');
+
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor('#047857'); // emerald green
+      doc.text('PAYMENTS RECEIVED HISTORY', 18, currentY);
+      doc.text('Amount', 192, currentY, { align: 'right' });
+
+      currentY += 6;
+
+      receivedPayments.forEach((pay, idx) => {
+        if (currentY > 235) {
+          drawFooterOnPage(doc, currentPageNum, false);
+          doc.addPage();
+          currentPageNum++;
+          drawWatermarkOnPDFPage(doc);
+          currentY = 32;
+
+          // Repeat small header
+          doc.setFillColor('#ECFDF5');
+          doc.rect(15, currentY - 5, 180, 8, 'F');
+          doc.setFont('Helvetica', 'bold');
+          doc.setFontSize(8.5);
+          doc.setTextColor('#047857');
+          doc.text('PAYMENTS RECEIVED HISTORY (Continued)', 18, currentY);
+          doc.text('Amount', 192, currentY, { align: 'right' });
+          currentY += 6;
+        }
+
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor('#4B5563');
+        doc.text(`Payment Receipt #${idx + 1} - Recd from ${pay.receivedFrom}`, 18, currentY);
+
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor('#047857');
+        doc.text(`INR ${pay.amount.toLocaleString('en-IN')}`, 192, currentY, { align: 'right' });
+
+        // Row line
+        doc.setDrawColor(240, 253, 244);
+        doc.setLineWidth(0.25);
+        doc.line(15, currentY + 2.5, 195, currentY + 2.5);
+
+        currentY += 6.5;
+      });
+
+      // Total payments line
+      if (currentY > 235) {
+        drawFooterOnPage(doc, currentPageNum, false);
+        doc.addPage();
+        currentPageNum++;
+        drawWatermarkOnPDFPage(doc);
+        currentY = 32;
+      }
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor('#111827');
+      doc.text('Total Payments Received:', 18, currentY);
+      doc.setTextColor('#047857');
+      doc.text(`INR ${totalPaymentsReceived.toLocaleString('en-IN')}`, 192, currentY, { align: 'right' });
+      currentY += 8;
+    }
+
     if (studioProjects.length === 0) {
       doc.setFont('Helvetica', 'italic');
       doc.setFontSize(9);
@@ -547,6 +668,23 @@ export default function InvoiceView({
       doc.text(`INR ${gstAmount.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
     }
 
+    // Total Value
+    calcY += 6;
+    doc.setFont('Helvetica', 'normal');
+    doc.setTextColor('#4B5563');
+    doc.text('TOTAL VALUE:', 125, calcY);
+    doc.setFont('Helvetica', 'bold');
+    doc.text(`INR ${totalAmount.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
+
+    if (totalPaymentsReceived > 0) {
+      calcY += 6;
+      doc.setFont('Helvetica', 'normal');
+      doc.setTextColor('#047857');
+      doc.text('TOTAL PAID:', 125, calcY);
+      doc.setFont('Helvetica', 'bold');
+      doc.text(`- INR ${totalPaymentsReceived.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
+    }
+
     // Total Due
     calcY += 8;
     doc.setFillColor(fillBgColor); // Soft champagne cream
@@ -554,9 +692,9 @@ export default function InvoiceView({
     doc.setFont('Helvetica', 'bold');
     doc.setFontSize(10);
     doc.setTextColor('#111827');
-    doc.text('TOTAL AMOUNT DUE:', 125, calcY);
+    doc.text('BALANCE DUE:', 125, calcY);
     doc.setFont('Helvetica', 'extrabold');
-    doc.text(`INR ${totalAmount.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
+    doc.text(`INR ${balanceDue.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
 
     // Capture and embed payment QR Code inside the PDF
     const qrCanvas = document.getElementById('invoice-qr-canvas') as HTMLCanvasElement | null;
@@ -626,7 +764,7 @@ export default function InvoiceView({
       console.error('PDF generation failed:', err);
     }
 
-    const msg = `*THE FRAME CUT STUDIO OS - CONSOLIDATED LEDGER*%0A%0AInvoice ID: *${invoiceId}*%0APartner Studio: *${currentStudio.name}*%0ATotal Projects: *${studioProjects.length}*%0A%0A*Billing Summary:*%0AContract Value: ₹${subtotal.toLocaleString('en-IN')}%0A*Total Amount Due: ₹${totalAmount.toLocaleString('en-IN')}*%0A%0A📥 _Consolidated invoice statement PDF (${pdfFilename || 'Studio_Statement.pdf'}) has been generated and saved._%0A%0APlease clear outstanding balance before final master transfers. Thank you!`;
+    const msg = `*THE FRAME CUT STUDIO OS - CONSOLIDATED LEDGER*%0A%0AInvoice ID: *${invoiceId}*%0APartner Studio: *${currentStudio.name}*%0ATotal Projects: *${studioProjects.length}*%0A%0A*Billing Summary:*%0AContract Value: ₹${subtotal.toLocaleString('en-IN')}%0A*Total Value (incl. GST): ₹${totalAmount.toLocaleString('en-IN')}*%0A*Total Paid: ₹${totalPaymentsReceived.toLocaleString('en-IN')}*%0A*Outstanding Balance Due: ₹${balanceDue.toLocaleString('en-IN')}*%0A%0A📥 _Consolidated invoice statement PDF (${pdfFilename || 'Studio_Statement.pdf'}) has been generated and saved._%0A%0APlease clear outstanding balance before final master transfers. Thank you!`;
     window.open(`https://api.whatsapp.com/send?text=${msg}`, '_blank');
     triggerToast("PDF Export & WhatsApp", "Consolidated invoice PDF downloaded and shared via WhatsApp!");
   };
@@ -634,7 +772,7 @@ export default function InvoiceView({
   const handleShareEmail = () => {
     if (!currentStudio) return;
     const subject = `Consolidated Wedding Post-Production Statement: ${invoiceId} - ${currentStudio.name}`;
-    const body = `Dear ${currentStudio.ownerName || 'Partner'},\n\nPlease find the outstanding consolidated invoice statement for your studio.\n\nTotal Projects: ${studioProjects.length}\nTotal Budget Value: INR ${subtotal.toLocaleString('en-IN')}\nTotal Amount Due: INR ${totalAmount.toLocaleString('en-IN')}\n\nPlease clear the balance due to proceed with master video downloads.\n\nBest regards,\nSatish Tiwari\nThe Frame Cut Studio OS`;
+    const body = `Dear ${currentStudio.ownerName || 'Partner'},\n\nPlease find the outstanding consolidated invoice statement for your studio.\n\nTotal Projects: ${studioProjects.length}\nTotal Budget Value: INR ${subtotal.toLocaleString('en-IN')}\nTotal Invoice Value (incl. GST): INR ${totalAmount.toLocaleString('en-IN')}\nTotal Payments Cleared: INR ${totalPaymentsReceived.toLocaleString('en-IN')}\nOutstanding Balance Due: INR ${balanceDue.toLocaleString('en-IN')}\n\nPlease clear the balance due to proceed with master video downloads.\n\nBest regards,\nSatish Tiwari\nThe Frame Cut Studio OS`;
     window.open(`mailto:${currentStudio.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
   };
 
@@ -691,7 +829,7 @@ export default function InvoiceView({
   const handleRegisterInvoice = async () => {
     if (!currentStudio) return;
     
-    const dbBalanceDue = Math.max(0, totalAmount - advance);
+    const dbBalanceDue = Math.max(0, totalAmount - totalPaymentsReceived);
 
     await onAddInvoice({
       projectId: 'CONSOLIDATED',
@@ -704,7 +842,7 @@ export default function InvoiceView({
       gstAmount,
       discount,
       totalAmount,
-      amountPaid: advance,
+      amountPaid: totalPaymentsReceived,
       balanceDue: dbBalanceDue,
       gstNumber: currentStudio.gstNumber || undefined,
       status: dbBalanceDue <= 0 ? 'paid' : 'sent'
@@ -817,6 +955,80 @@ export default function InvoiceView({
               </span>
             </div>
           </div>
+        </div>
+
+        {/* Payments Received Management Section */}
+        <div className="border-t border-white/5 pt-4">
+          <div className="flex justify-between items-center cursor-pointer" onClick={() => setShowPaymentsManager(!showPaymentsManager)}>
+            <div className="flex items-center space-x-2">
+              <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center text-[10px] font-bold font-mono">₹</span>
+              <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider font-bold">Payments Received Ledger ({receivedPayments.length} payments, Total: ₹{totalPaymentsReceived.toLocaleString('en-IN')})</span>
+            </div>
+            <span className="text-gray-400 text-xs font-mono">{showPaymentsManager ? 'Hide ▴' : 'Show ▾'}</span>
+          </div>
+
+          {showPaymentsManager && (
+            <div className="mt-4 bg-black/20 rounded-2xl border border-white/5 p-4 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="block text-[9px] font-mono text-gray-400 uppercase mb-1">Received From (Person Name)</label>
+                  <input
+                    type="text"
+                    value={newPaymentFrom}
+                    onChange={(e) => setNewPaymentFrom(e.target.value)}
+                    placeholder="e.g. Bunty Bhaiya"
+                    className="w-full bg-charcoal-900 border border-luxury-green-800/20 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none placeholder-gray-600 font-sans"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-mono text-gray-400 uppercase mb-1">Amount Paid (₹)</label>
+                  <input
+                    type="number"
+                    value={newPaymentAmount || ''}
+                    onChange={(e) => setNewPaymentAmount(Number(e.target.value))}
+                    placeholder="e.g. 25000"
+                    className="w-full bg-charcoal-900 border border-luxury-green-800/20 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none placeholder-gray-600 font-mono"
+                  />
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={handleAddPayment}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] transition-all text-white font-mono font-bold text-[10px] uppercase tracking-wider py-2 px-4 rounded-xl cursor-pointer"
+                  >
+                    + Add Payment
+                  </button>
+                </div>
+              </div>
+
+              {/* Payments List Table */}
+              <div className="max-h-60 overflow-y-auto divide-y divide-white/5 pr-1 border-t border-white/5 pt-2">
+                {receivedPayments.length > 0 ? (
+                  receivedPayments.map((p) => (
+                    <div key={p.id} className="flex justify-between items-center py-2 text-xs">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-emerald-500 font-bold">✓</span>
+                        <span className="text-gray-300 font-medium">{p.receivedFrom}</span>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        <span className="font-mono text-emerald-400 font-bold">₹{p.amount.toLocaleString('en-IN')}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePayment(p.id)}
+                          className="text-red-400 hover:text-red-300 transition-colors p-1"
+                          title="Delete Payment"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-[10px] font-mono text-gray-500 py-2">No payments received registered yet for this invoice.</p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -944,6 +1156,40 @@ export default function InvoiceView({
                   </tbody>
                 </table>
               </div>
+
+              {/* Payments Received History Section */}
+              {receivedPayments.length > 0 && (
+                <div className="mt-8 pt-6 border-t border-gold-500/10 break-inside-avoid page-break-inside-avoid">
+                  <h4 className="font-mono text-stone-500 uppercase tracking-widest text-[9px] mb-3 flex items-center space-x-1.5 font-bold">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    <span>PAYMENTS RECEIVED HISTORY</span>
+                  </h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-gold-500/10 text-[8px] font-mono text-stone-400 uppercase tracking-wider">
+                          <th className="py-2 pl-2 font-semibold">Receipt ID</th>
+                          <th className="py-2 font-semibold">Received From</th>
+                          <th className="py-2 text-right pr-4 font-semibold">Amount Received</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gold-500/5 font-sans text-stone-600 text-xs">
+                        {receivedPayments.map((p, idx) => (
+                          <tr key={p.id} className="hover:bg-emerald-500/[0.01] transition-colors break-inside-avoid page-break-inside-avoid">
+                            <td className="py-2.5 pl-2 text-stone-400 font-mono text-[9px]">PAY-RCV-{(idx+1).toString().padStart(3, '0')}</td>
+                            <td className="py-2.5 font-medium text-stone-800">{p.receivedFrom}</td>
+                            <td className="py-2.5 text-right font-mono font-bold text-emerald-600 pr-4">₹{p.amount.toLocaleString('en-IN')}</td>
+                          </tr>
+                        ))}
+                        <tr className="bg-emerald-500/[0.02] font-semibold text-stone-900 border-t border-gold-500/10 break-inside-avoid page-break-inside-avoid">
+                          <td colSpan={2} className="py-2.5 pl-2 font-mono uppercase text-[9px] text-stone-500">Total Payments Cleared</td>
+                          <td className="py-2.5 text-right font-mono font-bold text-emerald-600 pr-4">₹{totalPaymentsReceived.toLocaleString('en-IN')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Subtotal summary calculations block */}
@@ -1038,9 +1284,19 @@ export default function InvoiceView({
                       <span className="text-stone-900 font-semibold">₹{gstAmount.toLocaleString('en-IN')}</span>
                     </div>
                   )}
-                  <div className="flex justify-between text-sm font-bold text-stone-900 pt-1">
-                    <span className="text-stone-900 tracking-wide">TOTAL AMOUNT DUE:</span>
-                    <span className="text-gold-700 font-sans font-black text-base">₹{totalAmount.toLocaleString('en-IN')}</span>
+                  <div className="flex justify-between text-sm font-bold text-stone-900 pt-1 border-b border-gold-500/10 pb-1.5">
+                    <span className="text-stone-900 tracking-wide">TOTAL VALUE:</span>
+                    <span className="text-stone-900 font-sans font-black">₹{totalAmount.toLocaleString('en-IN')}</span>
+                  </div>
+                  {totalPaymentsReceived > 0 && (
+                    <div className="flex justify-between text-emerald-600">
+                      <span className="font-medium">TOTAL PAID:</span>
+                      <span className="font-bold">- ₹{totalPaymentsReceived.toLocaleString('en-IN')}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-sm font-bold text-stone-900 pt-1.5">
+                    <span className="text-stone-950 tracking-wide">BALANCE DUE:</span>
+                    <span className="text-gold-700 font-sans font-black text-base">₹{balanceDue.toLocaleString('en-IN')}</span>
                   </div>
                 </div>
               </div>
