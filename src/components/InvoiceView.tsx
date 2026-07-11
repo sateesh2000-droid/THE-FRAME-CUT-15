@@ -19,7 +19,7 @@ import SwipeableCard from './SwipeableCard';
 import { Project, Studio, Invoice } from '../types';
 import Logo from './Logo';
 import { jsPDF } from 'jspdf';
-import { QRCodeSVG } from 'qrcode.react';
+import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 
 interface InvoiceViewProps {
   projects: Project[];
@@ -63,7 +63,6 @@ export default function InvoiceView({
   
   // Loaded state based on selected studio
   const [currentStudio, setCurrentStudio] = useState<Studio | null>(null);
-  const [studioProjects, setStudioProjects] = useState<Project[]>([]);
 
   useEffect(() => {
     if (studios.length > 0 && !selectedStudioId) {
@@ -71,27 +70,35 @@ export default function InvoiceView({
     }
   }, [studios, selectedStudioId]);
 
+  // Derive projects dynamically on every render to ensure always up-to-date and avoid stale state
+  const studioProjects = projects.filter(p => p.studioId === selectedStudioId);
+
+  // Keep track of the studio ID that we last loaded credentials for to avoid over-writing user inputs
+  const [lastLoadedStudioId, setLastLoadedStudioId] = useState<string>('');
+
   useEffect(() => {
     const studio = studios.find(s => s.id === selectedStudioId) || null;
     setCurrentStudio(studio);
     if (studio) {
-      const filtered = projects.filter(p => p.studioId === studio.id);
-      setStudioProjects(filtered);
-      
       // Auto invoice ID with a clean, dynamic prefix from the studio's name
       const cleanPrefix = studio.name.trim().slice(0, 3).toUpperCase().replace(/[^A-Z]/g, 'ST');
       setInvoiceId(`INV-2026-${cleanPrefix}`);
 
-      // Sync payment info from studio profile
-      setUpiId(studio.upiId || '7772999933@icici');
-      setPaymentLink(studio.paymentLink || '');
-      setQrType(studio.upiId ? 'upi' : (studio.paymentLink ? 'link' : 'upi'));
+      // Sync payment info from studio profile ONLY if selectedStudioId has changed
+      if (selectedStudioId !== lastLoadedStudioId) {
+        setUpiId(studio.upiId || '7772999933@icici');
+        setPaymentLink(studio.paymentLink || '');
+        setQrType(studio.upiId ? 'upi' : (studio.paymentLink ? 'link' : 'upi'));
+        setLastLoadedStudioId(selectedStudioId);
+      }
     } else {
-      setStudioProjects([]);
-      setUpiId('7772999933@icici');
-      setPaymentLink('');
+      if (selectedStudioId !== lastLoadedStudioId) {
+        setUpiId('7772999933@icici');
+        setPaymentLink('');
+        setLastLoadedStudioId(selectedStudioId);
+      }
     }
-  }, [selectedStudioId, projects, studios]);
+  }, [selectedStudioId, studios, lastLoadedStudioId]);
 
   // Calculations across all studio projects
   const subtotal = studioProjects.reduce((sum, p) => sum + p.projectAmount, 0);
@@ -555,6 +562,55 @@ export default function InvoiceView({
     doc.setFont('Helvetica', 'extrabold');
     doc.text(`INR ${balanceDue.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
 
+    // Capture and embed payment QR Code inside the PDF
+    const qrCanvas = document.getElementById('invoice-qr-canvas') as HTMLCanvasElement | null;
+    const qrImage = qrCanvas ? qrCanvas.toDataURL('image/png') : null;
+
+    if (qrImage) {
+      const qrBoxY = calcY + 5;
+      const qrBoxHeight = 35;
+      
+      // Ensure we don't overlap the page footer signature block
+      if (qrBoxY + qrBoxHeight < 240) {
+        // Draw background box for QR Code section in soft champagne/cream
+        doc.setFillColor('#FAF7F0');
+        doc.roundedRect(122, qrBoxY, 73, qrBoxHeight, 3, 3, 'F');
+        
+        // Draw gold border
+        doc.setDrawColor(197, 160, 89);
+        doc.setLineWidth(0.25);
+        doc.roundedRect(122, qrBoxY, 73, qrBoxHeight, 3, 3, 'D');
+        
+        // Draw QR Image
+        doc.addImage(qrImage, 'PNG', 124, qrBoxY + 3, 29, 29);
+        
+        // Draw Text next to QR Image inside the box
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(7);
+        doc.setTextColor('#C5A059');
+        const headerText = qrType === 'upi' ? 'UPI INSTANT SETTLEMENT' : 'DIRECT PAYMENT LINK';
+        doc.text(headerText, 156, qrBoxY + 8);
+        
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor('#111827');
+        const actionText = qrType === 'upi' ? 'Scan to Pay Balance' : 'Scan to Open Link';
+        doc.text(actionText, 156, qrBoxY + 13);
+        
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(6.5);
+        doc.setTextColor('#6B7280');
+        const detailText = qrType === 'upi' ? `UPI: ${upiId}` : (paymentLink.length > 25 ? paymentLink.substring(0, 22) + '...' : paymentLink);
+        doc.text(detailText, 156, qrBoxY + 18);
+        
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(7);
+        doc.setTextColor('#10B981');
+        const balanceText = qrType === 'upi' ? `Pre-filled: INR ${balanceDue.toLocaleString('en-IN')}` : 'Online Cards Accepted';
+        doc.text(balanceText, 156, qrBoxY + 24);
+      }
+    }
+
     // Draw final page footer with signature block
     drawFooterOnPage(doc, currentPageNum, true);
 
@@ -903,7 +959,7 @@ export default function InvoiceView({
                       <p>Consolidated ledger statement of active post-production. Please clear remaining balance dues for final raw assets delivery.</p>
                     </div>
 
-                    <div className="text-[9px] sm:text-[9.5px] font-mono text-stone-500 leading-relaxed space-y-0.5 bg-gold-500/[0.03] border border-gold-500/10 p-3 rounded-xl break-inside-avoid">
+                    <div className="text-[9px] sm:text-[9.5px] font-mono text-stone-500 leading-relaxed space-y-0.5 bg-gold-500/[0.03] border border-gold-500/10 p-3 rounded-xl break-inside-avoid page-break-inside-avoid invoice-bank-details">
                       <p className="font-bold text-stone-700 tracking-wider uppercase mb-1 flex items-center space-x-1.5">
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                         <span>BANK TRANSFER DETAILS</span>
@@ -919,7 +975,7 @@ export default function InvoiceView({
 
                   {/* Dynamic QR Code Section */}
                   {qrData ? (
-                    <div className="flex items-center space-x-4 bg-[#FAF7F0] border border-gold-500/15 p-3.5 rounded-2xl max-w-sm">
+                    <div className="flex items-center space-x-4 bg-[#FAF7F0] border border-gold-500/15 p-3.5 rounded-2xl max-w-sm break-inside-avoid page-break-inside-avoid invoice-qr-block">
                       <div className="p-1.5 bg-white border border-gold-500/20 rounded-xl shadow-inner shrink-0">
                         <QRCodeSVG 
                           value={qrData}
@@ -929,6 +985,18 @@ export default function InvoiceView({
                           level="M"
                           includeMargin={false}
                         />
+                        {/* Hidden canvas for high-resolution PDF export */}
+                        <div style={{ display: 'none' }}>
+                          <QRCodeCanvas
+                            id="invoice-qr-canvas"
+                            value={qrData}
+                            size={250}
+                            bgColor="#FFFFFF"
+                            fgColor="#1C1917"
+                            level="M"
+                            includeMargin={false}
+                          />
+                        </div>
                       </div>
                       <div className="space-y-1">
                         <p className="font-mono text-gold-600 font-bold uppercase tracking-wider text-[8px]">
@@ -946,7 +1014,7 @@ export default function InvoiceView({
                       </div>
                     </div>
                   ) : (
-                    <div className="p-3.5 bg-stone-100/60 border border-stone-200/50 rounded-2xl max-w-sm text-[9px] font-mono text-stone-400 leading-normal">
+                    <div className="p-3.5 bg-stone-100/60 border border-stone-200/50 rounded-2xl max-w-sm text-[9px] font-mono text-stone-400 leading-normal break-inside-avoid page-break-inside-avoid invoice-qr-block">
                       <span className="text-stone-500 font-bold uppercase block mb-1">PAYMENT RAIL PREVIEW</span>
                       No payment gateway or UPI configured. Set your UPI ID or Payment Link in the options bar above to render a live payment QR code instantly.
                     </div>
