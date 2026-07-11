@@ -136,7 +136,7 @@ export default function SettingsView({
         passwordsMap = JSON.parse(saved);
       }
 
-      const userEmail = currentUser.email;
+      const userEmail = currentUser?.email || 'anonymous';
       const expectedOldPassword = passwordsMap[userEmail] || (userEmail.includes('@') ? `${userEmail.split('@')[0]}123` : 'admin123');
 
       if (currentPassword !== expectedOldPassword) {

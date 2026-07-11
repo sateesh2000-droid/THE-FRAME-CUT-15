@@ -101,16 +101,26 @@ export default function App() {
 
   // 3. Simulated persistent login session
   useEffect(() => {
-    const savedUser = localStorage.getItem('tfc_user');
-    if (savedUser) {
-      const parsed = JSON.parse(savedUser);
-      setCurrentUser(parsed);
-      // Editors default to their assigned tab
-      if (parsed.role === 'editor') {
-        setActiveTab('projects');
-      } else if (parsed.role === 'studio') {
-        setActiveTab('projects');
+    try {
+      const savedUser = localStorage.getItem('tfc_user');
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        if (parsed && typeof parsed === 'object') {
+          setCurrentUser(parsed);
+          // Editors default to their assigned tab
+          if (parsed.role === 'editor') {
+            setActiveTab('projects');
+          } else if (parsed.role === 'studio') {
+            setActiveTab('projects');
+          }
+        } else {
+          // If the parsed result is not a valid object, clear it
+          localStorage.removeItem('tfc_user');
+        }
       }
+    } catch (e) {
+      console.error("Failed to parse tfc_user session from local storage. Cleaning up...", e);
+      localStorage.removeItem('tfc_user');
     }
   }, []);
 
