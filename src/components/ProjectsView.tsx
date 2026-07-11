@@ -151,6 +151,8 @@ const ProjectsView = React.memo(function ProjectsView({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [studioFilter, setStudioFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'deadline' | 'updated'>('deadline');
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   
   // Selected project for details drawer
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -610,18 +612,40 @@ const ProjectsView = React.memo(function ProjectsView({
     await onUpdateProject(proj.id, { status: newStatus });
   };
 
-  // Filter project lists
-  const filteredProjects = projects.filter(p => {
-    const matchesSearch = p.coupleName.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) || 
-                          p.studioName.toLowerCase().includes(debouncedSearchQuery.toLowerCase()) || 
-                          p.id.toLowerCase().includes(debouncedSearchQuery.toLowerCase());
-    
-    const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
-    const matchesPriority = priorityFilter === 'all' || p.priority === priorityFilter;
-    const matchesStudio = studioFilter === 'all' || p.studioId === studioFilter;
-    
-    return matchesSearch && matchesStatus && matchesPriority && matchesStudio;
-  });
+  // Filter and Sort project lists
+  const filteredProjects = useMemo(() => {
+    const filtered = projects.filter(p => {
+      const matchesSearch = (p.coupleName || '').toLowerCase().includes(debouncedSearchQuery.toLowerCase()) || 
+                            (p.studioName || '').toLowerCase().includes(debouncedSearchQuery.toLowerCase()) || 
+                            (p.id || '').toLowerCase().includes(debouncedSearchQuery.toLowerCase());
+      
+      const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
+      const matchesPriority = priorityFilter === 'all' || p.priority === priorityFilter;
+      const matchesStudio = studioFilter === 'all' || p.studioId === studioFilter;
+      
+      return matchesSearch && matchesStatus && matchesPriority && matchesStudio;
+    });
+
+    return [...filtered].sort((a, b) => {
+      if (sortBy === 'deadline') {
+        // "Deadline: Near" -> ascending order of deliveryDate.
+        const dateA = a.deliveryDate ? new Date(a.deliveryDate).getTime() : Infinity;
+        const dateB = b.deliveryDate ? new Date(b.deliveryDate).getTime() : Infinity;
+        return dateA - dateB;
+      } else {
+        // "Last Updated" -> descending order of updatedAt.
+        const getTimestamp = (val: any): number => {
+          if (!val) return 0;
+          if (typeof val.seconds === 'number') return val.seconds * 1000;
+          if (typeof val.toDate === 'function') return val.toDate().getTime();
+          if (val instanceof Date) return val.getTime();
+          const parsed = Date.parse(val);
+          return isNaN(parsed) ? 0 : parsed;
+        };
+        return getTimestamp(b.updatedAt) - getTimestamp(a.updatedAt);
+      }
+    });
+  }, [projects, debouncedSearchQuery, statusFilter, priorityFilter, studioFilter, sortBy]);
 
   return (
     <div className="space-y-6">
@@ -743,6 +767,29 @@ const ProjectsView = React.memo(function ProjectsView({
               </button>
             </div>
 
+            {/* Sort Toggle (Deadline: Near / Last Updated) */}
+            <div className="flex bg-charcoal-950 border border-luxury-green-800/20 p-1 rounded-2xl items-center">
+              <span className="text-[10px] uppercase font-mono text-gray-500 px-2 select-none hidden sm:inline">Sort:</span>
+              <button
+                type="button"
+                id="sort-deadline"
+                onClick={() => setSortBy('deadline')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold tracking-wider transition-all cursor-pointer ${sortBy === 'deadline' ? 'bg-luxury-green-800 text-gold-400 font-bold shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+                title="Sort by Nearest Deadline"
+              >
+                Deadline
+              </button>
+              <button
+                type="button"
+                id="sort-updated"
+                onClick={() => setSortBy('updated')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold tracking-wider transition-all cursor-pointer ${sortBy === 'updated' ? 'bg-luxury-green-800 text-gold-400 font-bold shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+                title="Sort by Last Updated"
+              >
+                Last Updated
+              </button>
+            </div>
+
             {/* Status Select */}
             <select
               value={statusFilter}
@@ -833,13 +880,12 @@ const ProjectsView = React.memo(function ProjectsView({
                   alert(`Project ${proj.id} has been closed/archived successfully!`);
                 }}
                 onTap={() => {
-                  setSelectedProject(proj);
-                  setIsDetailOpen(true);
+                  setExpandedProjectId(expandedProjectId === proj.id ? null : proj.id);
                 }}
-                className="rounded-3xl bg-gradient-to-b from-charcoal-900 to-charcoal-950 border border-luxury-green-800/10 relative overflow-hidden flex flex-col h-[410px] justify-between cursor-pointer group hover:border-gold-500/20 shadow-lg hover:shadow-xl transition-all duration-300"
+                className={`rounded-3xl bg-gradient-to-b from-charcoal-900 to-charcoal-950 border border-luxury-green-800/10 relative overflow-hidden flex flex-col ${expandedProjectId === proj.id ? 'min-h-[410px] h-auto pb-4' : 'h-[410px]'} justify-between cursor-pointer group hover:border-gold-500/20 shadow-lg hover:shadow-xl transition-all duration-300`}
               >
                 {/* Photo Top Header */}
-                <div className="h-44 relative overflow-hidden">
+                <div className="h-44 relative overflow-hidden shrink-0">
                   <img
                     src={proj.couplePhoto || DEFAULT_COVERS[0].url}
                     alt={proj.coupleName}
@@ -912,6 +958,17 @@ const ProjectsView = React.memo(function ProjectsView({
                       </div>
                       <div className="flex items-center space-x-1 shrink-0" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
                         <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedProject(proj);
+                            setIsDetailOpen(true);
+                          }}
+                          className="p-1.5 bg-charcoal-950 hover:bg-luxury-green-800/30 rounded-lg text-gray-400 hover:text-gold-500 border border-luxury-green-800/20 transition-colors cursor-pointer"
+                          title="View Full Specifications Drawer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={(e) => openEditModal(proj, e)}
                           className="p-1.5 bg-charcoal-950 hover:bg-luxury-green-800/30 rounded-lg text-gray-400 hover:text-gold-500 border border-luxury-green-800/20 transition-colors cursor-pointer"
                           title="Edit Specifications"
@@ -951,10 +1008,115 @@ const ProjectsView = React.memo(function ProjectsView({
                         </div>
                       </div>
                     </div>
+
+                    {/* Collapsible details container */}
+                    <AnimatePresence>
+                      {expandedProjectId === proj.id && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.25, ease: 'easeInOut' }}
+                          className="mt-4 pt-4 border-t border-luxury-green-800/15 space-y-4 overflow-hidden"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {/* Detailed Team Assignments */}
+                          <div>
+                            <span className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider font-mono block">Detailed Team Assignment</span>
+                            <div className="space-y-1.5 mt-1.5">
+                              <div className="p-2 bg-charcoal-950/60 rounded-xl border border-white/5 flex items-center justify-between text-xs text-gray-300">
+                                <span className="flex items-center space-x-1.5">
+                                  <User className="w-3.5 h-3.5 text-gold-400" />
+                                  <span className="font-semibold text-white truncate max-w-[140px]">
+                                    Lead: {proj.assignedEditorName || 'Unassigned'}
+                                  </span>
+                                </span>
+                                {proj.isSplitProject ? (
+                                  <span className="text-[10px] font-mono text-gold-400 bg-gold-400/10 px-1.5 py-0.5 rounded">
+                                    ₹{(proj.firstEditorShare || 0).toLocaleString('en-IN')}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-mono text-gold-400 bg-gold-400/10 px-1.5 py-0.5 rounded">
+                                    ₹{(proj.editorPayment || 0).toLocaleString('en-IN')}
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {proj.isSplitProject && (
+                                <div className="p-2 bg-charcoal-950/60 rounded-xl border border-white/5 flex items-center justify-between text-xs text-gray-300">
+                                  <span className="flex items-center space-x-1.5">
+                                    <User className="w-3.5 h-3.5 text-gold-400/70" />
+                                    <span className="font-semibold text-white truncate max-w-[140px]">
+                                      Split: {proj.secondEditorName || 'Unassigned'}
+                                    </span>
+                                  </span>
+                                  <span className="text-[10px] font-mono text-gold-400 bg-gold-400/10 px-1.5 py-0.5 rounded">
+                                    ₹{(proj.secondEditorShare || 0).toLocaleString('en-IN')}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Detailed Revision Notes */}
+                          <div>
+                            <span className="text-[9px] text-gray-500 font-semibold uppercase tracking-wider font-mono block">Revision History ({revisions.filter(r => r.projectId === proj.id).length})</span>
+                            <div className="space-y-1.5 mt-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+                              {revisions.filter(r => r.projectId === proj.id).length > 0 ? (
+                                revisions.filter(r => r.projectId === proj.id).map((rev) => (
+                                  <div key={rev.id} className="p-2 bg-charcoal-950/40 rounded-xl border border-luxury-green-800/10 text-[11px]">
+                                    <div className="flex justify-between items-center mb-1">
+                                      <span className="font-mono text-gold-400 font-bold text-[9px]">REV-#{rev.revisionNumber}</span>
+                                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-bold ${
+                                        rev.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-emerald-500/10 text-emerald-400'
+                                      }`}>
+                                        {rev.status === 'pending' ? 'Pending' : 'Resolved'}
+                                      </span>
+                                    </div>
+                                    <p className="text-gray-300 leading-normal">{rev.notes}</p>
+                                  </div>
+                                ))
+                              ) : (
+                                <p className="text-[10px] font-mono text-gray-500 italic text-center py-2 bg-charcoal-950/20 rounded-xl">
+                                  No revisions logged yet
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Inline Controls */}
+                          <div className="flex gap-2 pt-2">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedProject(proj);
+                                setIsDetailOpen(true);
+                              }}
+                              className="flex-1 flex items-center justify-center space-x-1.5 py-2 bg-luxury-green-800/40 hover:bg-luxury-green-800/70 border border-gold-500/10 hover:border-gold-500/30 text-gold-400 hover:text-white rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all duration-200 cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Full Specs Drawer</span>
+                            </button>
+                            
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedProjectId(null);
+                              }}
+                              className="flex items-center justify-center px-3 py-2 bg-charcoal-950 hover:bg-charcoal-900 border border-white/5 hover:border-white/10 text-gray-400 hover:text-white rounded-xl text-[10px] font-bold tracking-wider uppercase transition-all duration-200 cursor-pointer"
+                            >
+                              ✕ Close
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
 
                   {/* Card Bottom / Countdown */}
-                  <div className="border-t border-luxury-green-800/10 pt-4 flex items-center justify-between text-[11px] text-gray-400 font-mono">
+                  <div className="border-t border-luxury-green-800/10 pt-4 mt-4 flex items-center justify-between text-[11px] text-gray-400 font-mono shrink-0">
                     <div className="flex items-center space-x-1.5">
                       <CalendarIcon className="w-3.5 h-3.5 text-luxury-green-500" />
                       <span>{proj.deliveryDate}</span>
@@ -1132,10 +1294,9 @@ const ProjectsView = React.memo(function ProjectsView({
                           alert(`Project ${proj.id} has been closed/archived successfully!`);
                         }}
                         onTap={() => {
-                          setSelectedProject(proj);
-                          setIsDetailOpen(true);
+                          setExpandedProjectId(expandedProjectId === proj.id ? null : proj.id);
                         }}
-                        className="p-4 rounded-2xl bg-charcoal-800/80 border border-luxury-green-800/15 hover:border-gold-500/20 cursor-pointer transition-all duration-200 shadow-md group"
+                        className={`p-4 rounded-2xl bg-charcoal-800/80 border border-luxury-green-800/15 hover:border-gold-500/20 cursor-pointer transition-all duration-200 shadow-md group ${expandedProjectId === proj.id ? 'border-gold-500/30' : ''}`}
                       >
                         <div className="flex justify-between items-start">
                           <span className="text-[9px] font-mono bg-charcoal-950 px-1.5 py-0.5 rounded text-gold-400">
@@ -1158,6 +1319,17 @@ const ProjectsView = React.memo(function ProjectsView({
                             )}
                           </div>
                           <div className="flex items-center space-x-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedProject(proj);
+                                setIsDetailOpen(true);
+                              }}
+                              className="p-1 hover:bg-luxury-green-800/30 rounded text-gray-400 hover:text-gold-500 transition-colors cursor-pointer"
+                              title="View Specifications Drawer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               onClick={(e) => openEditModal(proj, e)}
                               className="p-1 hover:bg-luxury-green-800/30 rounded text-gray-400 hover:text-gold-500 transition-colors cursor-pointer"
@@ -1196,6 +1368,85 @@ const ProjectsView = React.memo(function ProjectsView({
                             </div>
                           </div>
                         )}
+
+                        {/* Collapsible expanded section in Kanban */}
+                        <AnimatePresence>
+                          {expandedProjectId === proj.id && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.25, ease: 'easeInOut' }}
+                              className="mt-3 pt-3 border-t border-luxury-green-800/10 space-y-3 overflow-hidden text-left"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div>
+                                <span className="text-[8px] text-gray-500 font-semibold uppercase tracking-wider font-mono block">Assignments</span>
+                                <div className="space-y-1 mt-1 text-[11px] text-gray-300">
+                                  <div className="flex justify-between items-center bg-charcoal-950/40 p-1.5 rounded border border-white/5">
+                                    <span className="truncate">Lead: {proj.assignedEditorName || 'Unassigned'}</span>
+                                    <span className="text-gold-400 font-mono text-[9px]">
+                                      ₹{(proj.isSplitProject ? (proj.firstEditorShare || 0) : (proj.editorPayment || 0)).toLocaleString('en-IN')}
+                                    </span>
+                                  </div>
+                                  {proj.isSplitProject && (
+                                    <div className="flex justify-between items-center bg-charcoal-950/40 p-1.5 rounded border border-white/5">
+                                      <span className="truncate">Split: {proj.secondEditorName || 'Unassigned'}</span>
+                                      <span className="text-gold-400 font-mono text-[9px]">
+                                        ₹{(proj.secondEditorShare || 0).toLocaleString('en-IN')}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div>
+                                <span className="text-[8px] text-gray-500 font-semibold uppercase tracking-wider font-mono block">Latest Revisions ({revisions.filter(r => r.projectId === proj.id).length})</span>
+                                <div className="space-y-1 mt-1 max-h-24 overflow-y-auto custom-scrollbar">
+                                  {revisions.filter(r => r.projectId === proj.id).length > 0 ? (
+                                    revisions.filter(r => r.projectId === proj.id).slice(0, 2).map((rev) => (
+                                      <div key={rev.id} className="p-1.5 bg-charcoal-950/30 rounded border border-luxury-green-800/5 text-[10px]">
+                                        <div className="flex justify-between items-center text-[8px] mb-0.5">
+                                          <span className="font-mono text-gold-400 font-bold">REV-#{rev.revisionNumber}</span>
+                                          <span className={rev.status === 'pending' ? 'text-yellow-500' : 'text-emerald-400'}>
+                                            {rev.status === 'pending' ? 'Pending' : 'Done'}
+                                          </span>
+                                        </div>
+                                        <p className="text-gray-400 line-clamp-2 leading-tight">{rev.notes}</p>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <p className="text-[9px] font-mono text-gray-600 italic text-center py-1.5">No revisions logged</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex gap-1.5 pt-1.5">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedProject(proj);
+                                    setIsDetailOpen(true);
+                                  }}
+                                  className="flex-1 py-1.5 bg-luxury-green-800/40 hover:bg-luxury-green-800/70 border border-gold-500/10 text-gold-400 hover:text-white rounded-lg text-[9px] font-bold tracking-wider uppercase transition-all cursor-pointer text-center"
+                                >
+                                  Specs Panel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExpandedProjectId(null);
+                                  }}
+                                  className="px-2 py-1.5 bg-charcoal-950 hover:bg-charcoal-900 border border-white/5 text-gray-400 hover:text-white rounded-lg text-[9px] font-bold tracking-wider uppercase transition-all cursor-pointer"
+                                >
+                                  ✕ Close
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
 
                         <div className="flex justify-between items-center mt-4 pt-3 border-t border-luxury-green-800/5 text-[9px] text-gray-500 font-mono">
                           <span>Lead: {proj.assignedEditorName || 'Unassigned'}</span>

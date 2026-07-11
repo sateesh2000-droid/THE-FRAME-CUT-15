@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 interface LogoProps {
   className?: string;
@@ -8,6 +8,9 @@ interface LogoProps {
 }
 
 export default function Logo({ className = '', size = 100, showText = false, variant = 'gold' }: LogoProps) {
+  const uniqueId = useId().replace(/:/g, '');
+  const gradientId = `metallic-gradient-${variant}-${uniqueId}`;
+
   // Select gradient based on variant
   const getGradientColors = () => {
     switch (variant) {
@@ -62,7 +65,7 @@ export default function Logo({ className = '', size = 100, showText = false, var
         className={shadowClass}
       >
         <defs>
-          <linearGradient id={`metallic-gradient-${variant}`} x1="0%" y1="0%" x2="100%" y2="100%">
+          <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
             {getGradientColors()}
           </linearGradient>
         </defs>
@@ -70,7 +73,7 @@ export default function Logo({ className = '', size = 100, showText = false, var
         {/* Outer floating arch */}
         <path
           d="M 47.5 24.5 A 17 17 0 0 1 61.5 41.5 L 61.5 68"
-          stroke={`url(#metallic-gradient-${variant})`}
+          stroke={`url(#${gradientId})`}
           strokeWidth="3.2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -79,7 +82,7 @@ export default function Logo({ className = '', size = 100, showText = false, var
         {/* Inner arch */}
         <path
           d="M 32 28 A 21 21 0 0 1 53 49 L 53 68"
-          stroke={`url(#metallic-gradient-${variant})`}
+          stroke={`url(#${gradientId})`}
           strokeWidth="3.2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -88,7 +91,7 @@ export default function Logo({ className = '', size = 100, showText = false, var
         {/* Left vertical stem of F */}
         <path
           d="M 32 28 L 32 49"
-          stroke={`url(#metallic-gradient-${variant})`}
+          stroke={`url(#${gradientId})`}
           strokeWidth="3.2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -97,7 +100,7 @@ export default function Logo({ className = '', size = 100, showText = false, var
         {/* Middle crossbar of F */}
         <path
           d="M 32 38.5 L 43.5 38.5"
-          stroke={`url(#metallic-gradient-${variant})`}
+          stroke={`url(#${gradientId})`}
           strokeWidth="3.2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -106,13 +109,13 @@ export default function Logo({ className = '', size = 100, showText = false, var
         {/* Horizontal base divider line */}
         <path
           d="M 23 50 L 77 50"
-          stroke={`url(#metallic-gradient-${variant})`}
+          stroke={`url(#${gradientId})`}
           strokeWidth="2.8"
           strokeLinecap="round"
         />
 
         {/* Small bottom-left dot */}
-        <circle cx="32" cy="57" r="1.8" fill={`url(#metallic-gradient-${variant})`} />
+        <circle cx="32" cy="57" r="1.8" fill={`url(#${gradientId})`} />
       </svg>
 
       {showText && (

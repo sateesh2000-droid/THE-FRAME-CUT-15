@@ -484,7 +484,7 @@ export default function ReportsView({ projects, studios, editors, expenses }: Re
 
           <div className="h-72">
             {profitMarginTrend.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={288} minWidth={100}>
                 <LineChart data={profitMarginTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(30, 85, 70, 0.05)" />
                   <XAxis dataKey="name" stroke="#6b7280" fontSize={11} tickLine={false} />
@@ -514,9 +514,9 @@ export default function ReportsView({ projects, studios, editors, expenses }: Re
           </div>
 
           <div className="h-72 flex flex-col md:flex-row items-center justify-between">
-            <div className="w-full md:w-1/2 h-full">
+            <div className="w-full md:w-1/2 h-[288px]">
               {expenseAllocationData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height={288} minWidth={100}>
                   <PieChart>
                     <Pie
                       data={expenseAllocationData}

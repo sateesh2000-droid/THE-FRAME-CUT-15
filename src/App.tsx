@@ -552,6 +552,7 @@ export default function App() {
             editors={editors}
             studios={studios}
             payments={payments}
+            invoices={invoices}
             onAddExpense={handleAddExpense}
             onDeleteExpense={handleDeleteExpense}
             initialTriggerAction={subActionTrigger === 'add_expense' ? 'add_expense' : undefined}

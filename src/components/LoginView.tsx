@@ -3,11 +3,8 @@ import {
   Lock, 
   Mail, 
   ArrowRight, 
-  ShieldCheck, 
-  Sparkles, 
-  Laptop, 
-  Building2,
-  Film
+  Eye, 
+  EyeOff
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import Logo from './Logo';
@@ -21,6 +18,7 @@ export default function LoginView({ onLogin }: LoginViewProps) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // Load passwords from localStorage with fallback defaults
   const getPasswords = () => {
@@ -49,7 +47,7 @@ export default function LoginView({ onLogin }: LoginViewProps) {
       const expectedPassword = passwordsMap[email as keyof typeof passwordsMap] || 'admin123';
 
       if (password !== expectedPassword) {
-        throw new Error(`Incorrect password for ${email}. Default password is: ${email === 'sateesh2000' ? 'Sateesh@504054' : (email === 'vansh2000' ? '8889995988' : (email.includes('@') ? email.split('@')[0] + '123' : 'admin123'))} (or check Settings to change it)`);
+        throw new Error("Access Denied. Incorrect password. Please verify your security password and try again.");
       }
 
       // Find role based on credentials email
@@ -70,141 +68,126 @@ export default function LoginView({ onLogin }: LoginViewProps) {
     }
   };
 
-  // Quick simulation options
-  const simulationUsers = [
-    { 
-      name: 'Satish Tiwari', 
-      email: 'sateesh2000', 
-      role: 'admin' as const, 
-      label: 'System Admin', 
-      icon: ShieldCheck, 
-      color: 'border-gold-500/30 hover:border-gold-500 text-gold-400 bg-gold-500/5' 
-    },
-    { 
-      name: 'Vansh Tiwari', 
-      email: 'vansh2000', 
-      role: 'editor' as const, 
-      id: 'editor-vansh',
-      label: 'Video Editor', 
-      icon: Laptop, 
-      color: 'border-luxury-green-500/30 hover:border-luxury-green-500 text-luxury-green-400 bg-luxury-green-500/5' 
-    },
-    { 
-      name: 'Wedding By KK', 
-      email: 'kk@weddingbykk.com', 
-      role: 'studio' as const, 
-      id: 'studio-kk',
-      label: 'Studio Client', 
-      icon: Building2, 
-      color: 'border-purple-500/30 hover:border-purple-500 text-purple-400 bg-purple-500/5' 
-    }
-  ];
-
-  const handleSimulationClick = (userEmail: string) => {
-    const passwordsMap = getPasswords();
-    const userPass = passwordsMap[userEmail as keyof typeof passwordsMap] || '';
-    setEmail(userEmail);
-    setPassword(userPass);
-    setError('');
-  };
-
   return (
     <div className="min-h-screen bg-charcoal-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      {/* Cinematic ambient blur backgrounds */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-luxury-green-900/10 rounded-full blur-3xl animate-pulse-slow pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-gold-700/5 rounded-full blur-3xl animate-pulse-slow pointer-events-none" />
+      {/* Cinematic ambient luxury blur backgrounds */}
+      <div className="absolute top-1/10 left-1/4 w-[500px] h-[500px] bg-luxury-green-900/10 rounded-full blur-[140px] animate-pulse-slow pointer-events-none" />
+      <div className="absolute bottom-1/10 right-1/4 w-[450px] h-[450px] bg-gold-700/5 rounded-full blur-[120px] animate-pulse-slow pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gold-900/5 rounded-full blur-[180px] pointer-events-none" />
 
       <div className="w-full max-w-md space-y-8 relative z-10">
         
-        {/* Logo and Titles */}
-        <div className="text-center space-y-2">
-          <Logo size={72} />
-          <h1 className="text-2xl font-black font-display text-white tracking-widest mt-4">THE FRAME CUT</h1>
-          <p className="text-[10px] text-gold-400 font-mono uppercase tracking-widest leading-none mt-1">Studio OS ERP</p>
+        {/* Logo and Titles with cinematic animation container */}
+        <div className="text-center space-y-3">
+          <div className="inline-block p-4 rounded-full bg-gradient-to-b from-charcoal-900 to-charcoal-950 border border-white/5 shadow-xl">
+            <Logo size={76} variant="gold" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-black font-display text-white tracking-[0.25em] mt-2 bg-gradient-to-r from-white via-gold-100 to-gold-400 bg-clip-text text-transparent">
+              THE FRAME CUT
+            </h1>
+            <p className="text-[10px] text-gold-400 font-mono uppercase tracking-[0.3em] leading-none mt-2 font-medium">
+              Studio OS ERP
+            </p>
+          </div>
         </div>
 
-        {/* Credentials Form Box */}
-        <div className="p-8 rounded-3xl glass-panel relative overflow-hidden">
-          <h2 className="text-base font-bold text-white font-display mb-4">Account Authentication</h2>
+        {/* Credentials Form Box with Premium Glassmorphism & Gold Border glow */}
+        <div className="p-8 rounded-3xl bg-charcoal-900/60 backdrop-blur-xl border border-gold-500/20 shadow-2xl relative overflow-hidden ring-1 ring-gold-500/10 hover:border-gold-500/35 transition-all duration-500 hover:shadow-[0_0_50px_rgba(212,175,55,0.12)]">
+          {/* Subtle gold top-gradient border */}
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-gold-500/40 to-transparent" />
+          
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-sm font-semibold text-white font-display uppercase tracking-wider">
+              Account Authentication
+            </h2>
+            <div className="flex items-center space-x-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[9px] font-mono text-emerald-400 uppercase tracking-widest font-semibold">SECURE NODE</span>
+            </div>
+          </div>
           
           {error && (
-            <div className="mb-4 p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-xs text-red-400">
+            <div className="mb-5 p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 leading-relaxed font-sans shadow-inner">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleCredentialsSubmit} className="space-y-4">
+          <form onSubmit={handleCredentialsSubmit} className="space-y-5">
             <div>
-              <label className="block text-[10px] font-mono text-gray-500 uppercase mb-1">Username or Email address</label>
+              <label className="block text-[10px] font-mono text-gray-400 uppercase tracking-wider mb-1.5">
+                Username or Email address
+              </label>
               <div className="relative">
-                <Mail className="absolute left-3.5 top-3 w-4 h-4 text-gray-500" />
+                <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-gray-500 transition-colors group-focus-within:text-gold-400" />
                 <input
                   type="text"
                   required
                   placeholder="sateesh2000 or name@framecut.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-charcoal-900 border border-luxury-green-800/30 rounded-xl text-xs text-white focus:outline-none focus:border-gold-500/40"
+                  className="w-full pl-11 pr-4 py-3 bg-charcoal-950/60 border border-luxury-green-800/30 rounded-xl text-xs text-white placeholder-gray-600 focus:outline-none focus:border-gold-500/50 focus:ring-1 focus:ring-gold-500/20 transition-all duration-300 focus:shadow-[0_0_15px_rgba(212,175,55,0.1)]"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-[10px] font-mono text-gray-500 uppercase mb-1">Security password</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-[10px] font-mono text-gray-400 uppercase tracking-wider">
+                  Security password
+                </label>
+                {email && !password && (
+                  <span className="text-[9px] font-mono text-gold-400 animate-pulse bg-gold-500/10 px-2 py-0.5 rounded border border-gold-500/20 uppercase">
+                    Password required
+                  </span>
+                )}
+              </div>
               <div className="relative">
-                <Lock className="absolute left-3.5 top-3 w-4 h-4 text-gray-500" />
+                <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-gray-500" />
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   required
-                  placeholder="••••••••"
+                  placeholder={email ? "Password required" : "••••••••"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-charcoal-900 border border-luxury-green-800/30 rounded-xl text-xs text-white focus:outline-none"
+                  className={`w-full pl-11 pr-11 py-3 bg-charcoal-950/60 border rounded-xl text-xs text-white placeholder-gray-600 focus:outline-none focus:border-gold-500/50 focus:ring-1 focus:ring-gold-500/20 transition-all duration-300 focus:shadow-[0_0_15px_rgba(212,175,55,0.1)] ${
+                    email && !password ? 'border-gold-500/40 shadow-[0_0_10px_rgba(212,175,55,0.05)]' : 'border-luxury-green-800/30'
+                  }`}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3.5 top-3.5 text-gray-500 hover:text-gold-400 transition-colors cursor-pointer"
+                  title={showPassword ? "Hide Password" : "Show Password"}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-gradient-to-r from-luxury-green-800 to-luxury-green-600 border border-gold-500/30 hover:border-gold-500/50 rounded-xl text-white text-xs font-bold flex items-center justify-center space-x-2 transition-all cursor-pointer gold-glow"
+              className="w-full py-3.5 bg-gradient-to-r from-luxury-green-800 to-luxury-green-600 border border-gold-500/30 hover:border-gold-500/50 rounded-xl text-white text-xs font-bold flex items-center justify-center space-x-2 transition-all cursor-pointer gold-glow hover:scale-[1.01] active:scale-[0.99] disabled:opacity-55"
             >
               <span>{loading ? 'Authenticating...' : 'Sign In To OS'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
-          {/* Quick Simulation Selector */}
-          <div className="mt-6 border-t border-luxury-green-800/15 pt-5">
-            <span className="block text-[9px] font-mono text-gray-500 uppercase tracking-wider text-center mb-3">
-              - Quick Simulation Access profiles -
-            </span>
-            
-            <div className="space-y-2">
-              {simulationUsers.map((user) => {
-                const Icon = user.icon;
-                return (
-                  <button
-                    key={user.email}
-                    onClick={() => handleSimulationClick(user.email)}
-                    className={`w-full p-3 rounded-2xl border flex items-center justify-between text-left transition-all ${user.color} cursor-pointer hover:scale-[1.02] active:scale-[0.98]`}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2 bg-charcoal-950/80 rounded-xl shrink-0">
-                        <Icon className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <span className="text-xs font-bold text-white leading-tight block">{user.name}</span>
-                        <span className="text-[9px] text-gray-500 font-mono block mt-0.5">{user.email}</span>
-                      </div>
-                    </div>
-
-                    <span className="text-[9px] font-mono uppercase tracking-wider font-semibold opacity-70">
-                      {user.role}
-                    </span>
-                  </button>
-                );
-              })}
+          {/* Authorized Username Information */}
+          <div className="mt-6 pt-5 border-t border-luxury-green-800/10 text-center">
+            <p className="text-[10px] font-mono text-gray-500 uppercase tracking-widest mb-2.5 font-medium">
+              Authorized System Profiles
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] bg-charcoal-950/40 p-2.5 rounded-xl border border-white/5">
+              <span className="text-gray-400 font-sans">
+                Admin: <strong className="text-gold-400 font-mono">sateesh2000</strong>
+              </span>
+              <span className="text-gray-600 font-mono">•</span>
+              <span className="text-gray-400 font-sans">
+                Editor: <strong className="text-gold-400 font-mono">vansh2000</strong>
+              </span>
             </div>
           </div>
         </div>

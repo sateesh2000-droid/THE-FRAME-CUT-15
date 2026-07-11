@@ -1,5 +1,5 @@
 {
-  "name": "The Frame Cut Studio OS",
+  "name": "The Frame Cut Studio",
   "description": "Premium Wedding Video Editing Management System (ERP) featuring a dedicated single-page Wedding Registry suite, project tracking, studio portals, editor assignments, and financial ledgers.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

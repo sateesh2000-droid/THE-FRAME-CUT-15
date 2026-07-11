@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Film, 
   TrendingUp, 
@@ -42,6 +42,7 @@ import {
   Trash2,
   Pin,
   FileText,
+  User,
   Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -55,9 +56,12 @@ import {
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
-  Legend
+  Legend,
+  LineChart,
+  Line
 } from 'recharts';
 import { Project, Studio, Editor, Expense, AppNotification, CalendarEvent, Invoice, PaymentHistory } from '../types';
+import Logo from './Logo';
 
 interface DashboardViewProps {
   projects: Project[];
@@ -160,6 +164,7 @@ const DashboardView = React.memo(function DashboardView({
   // Payment Ledger Modal States
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentType, setPaymentType] = useState<'studio' | 'editor'>('studio');
+  const [selectedStudioId, setSelectedStudioId] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [selectedEditorIdToPay, setSelectedEditorIdToPay] = useState('');
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
@@ -170,34 +175,61 @@ const DashboardView = React.memo(function DashboardView({
   const [paymentSuccess, setPaymentSuccess] = useState('');
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
-  // Find selected project details
-  const formSelectedProject = projects.find(p => p.id === selectedProjectId);
-
-  // Sync selected editor ID when project is selected
+  // Reset selected studio and project when modal opens
   useEffect(() => {
-    const proj = projects.find(p => p.id === selectedProjectId);
-    if (proj) {
-      setSelectedEditorIdToPay(proj.assignedEditorId || '');
-    } else {
+    if (isPaymentModalOpen) {
       setSelectedEditorIdToPay('');
+      setSelectedProjectId('');
+      setPaymentAmount(0);
+      setPaymentNotes('');
+      setPaymentError('');
+      setPaymentSuccess('');
     }
-  }, [selectedProjectId, projects]);
+  }, [isPaymentModalOpen]);
 
-  // Calculate target budget for the selected editor (supports split project)
-  const editorTargetPayment = formSelectedProject
-    ? (formSelectedProject.isSplitProject
-        ? (selectedEditorIdToPay === formSelectedProject.assignedEditorId
-            ? (formSelectedProject.firstEditorShare || 0)
-            : (formSelectedProject.secondEditorShare || 0))
-        : (formSelectedProject.editorPayment || 0))
-    : 0;
+  // Calculate general studio financial states
+  const studioFinancialSummary = useMemo(() => {
+    if (!selectedStudioId) return null;
+    const studioProjects = projects.filter(p => p.studioId === selectedStudioId);
+    const totalContract = studioProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0);
+    const totalReceived = studioProjects.reduce((sum, p) => sum + (p.advancePayment || 0), 0);
+    const totalOutstanding = studioProjects.reduce((sum, p) => sum + (p.remainingBalance || 0), 0);
+    return {
+      totalContract,
+      totalReceived,
+      totalOutstanding,
+      projectCount: studioProjects.length
+    };
+  }, [projects, selectedStudioId]);
 
-  // Calculate existing paid amount for editor for this project
-  const editorAlreadyPaid = formSelectedProject && selectedEditorIdToPay
-    ? payments
-        .filter(pay => pay.projectId === formSelectedProject.id && pay.entityId === selectedEditorIdToPay && pay.entityType === 'editor')
-        .reduce((sum, pay) => sum + (pay.amount || 0), 0)
-    : 0;
+  // Calculate general editor financial states
+  const editorFinancialSummary = useMemo(() => {
+    if (!selectedEditorIdToPay) return null;
+    const editorProjects = projects.filter(p => p.assignedEditorId === selectedEditorIdToPay || p.secondEditorId === selectedEditorIdToPay);
+    
+    let totalBudget = 0;
+    editorProjects.forEach(p => {
+      if (p.isSplitProject) {
+        if (p.assignedEditorId === selectedEditorIdToPay) totalBudget += (p.firstEditorShare || 0);
+        else if (p.secondEditorId === selectedEditorIdToPay) totalBudget += (p.secondEditorShare || 0);
+      } else {
+        totalBudget += (p.editorPayment || 0);
+      }
+    });
+
+    const totalPaid = payments
+      .filter(pay => pay.entityId === selectedEditorIdToPay && pay.entityType === 'editor')
+      .reduce((sum, pay) => sum + (pay.amount || 0), 0);
+
+    const totalPending = Math.max(0, totalBudget - totalPaid);
+
+    return {
+      totalBudget,
+      totalPaid,
+      totalPending,
+      projectCount: editorProjects.length
+    };
+  }, [projects, payments, selectedEditorIdToPay]);
 
   // Premium synthesizer to play a cinematic modern chime natively (via Web Audio API)
   const playCinematicChime = () => {
@@ -257,74 +289,194 @@ const DashboardView = React.memo(function DashboardView({
     setPaymentError('');
     setPaymentSuccess('');
 
-    if (!selectedProjectId) {
-      setPaymentError('Please select a project first.');
+    if (paymentType === 'studio' && !selectedStudioId) {
+      setPaymentError('Please select a Studio Partner first.');
+      return;
+    }
+    if (paymentType === 'editor' && !selectedEditorIdToPay) {
+      setPaymentError('Please select a Video Editor first.');
       return;
     }
     if (paymentAmount <= 0) {
       setPaymentError('Please enter a valid amount greater than ₹0.');
       return;
     }
-    if (!formSelectedProject) {
-      setPaymentError('Selected project could not be found.');
-      return;
-    }
 
     setIsSubmittingPayment(true);
     try {
       if (paymentType === 'studio') {
-        const paymentData = {
-          entityId: formSelectedProject.studioId,
-          entityType: 'studio' as const,
-          projectId: formSelectedProject.id,
-          projectCoupleName: formSelectedProject.coupleName,
-          amount: paymentAmount,
-          date: paymentDate,
-          paymentMethod,
-          notes: paymentNotes || `Received payment for ${formSelectedProject.coupleName} Wedding film.`
-        };
-
-        // 1. Save payment entry
-        await onLogPayment(paymentData);
-
-        // 2. Update project balances
-        const newAdvance = (formSelectedProject.advancePayment || 0) + paymentAmount;
-        const newRemaining = Math.max(0, (formSelectedProject.projectAmount || 0) - newAdvance);
-        await onUpdateProject(formSelectedProject.id, {
-          advancePayment: newAdvance,
-          remainingBalance: newRemaining
-        });
-
-        playCinematicChime();
-        setPaymentSuccess(`Successfully recorded payment of ₹${paymentAmount.toLocaleString('en-IN')} from ${formSelectedProject.studioName}! Project balances updated.`);
-      } else {
-        // editor payout
-        if (!selectedEditorIdToPay) {
-          setPaymentError('This project has no assigned editor. Please assign an editor first in Projects view.');
+        const studio = studios.find(s => s.id === selectedStudioId);
+        if (!studio) {
+          setPaymentError('Selected studio could not be found.');
           setIsSubmittingPayment(false);
           return;
         }
 
-        const targetEditorName = selectedEditorIdToPay === formSelectedProject.assignedEditorId
-          ? (formSelectedProject.assignedEditorName || 'Lead Editor')
-          : (formSelectedProject.secondEditorName || 'Secondary Editor');
+        const studioProjects = projects.filter(p => p.studioId === selectedStudioId);
 
-        const paymentData = {
-          entityId: selectedEditorIdToPay,
-          entityType: 'editor' as const,
-          projectId: formSelectedProject.id,
-          projectCoupleName: formSelectedProject.coupleName,
-          amount: paymentAmount,
-          date: paymentDate,
-          paymentMethod,
-          notes: paymentNotes || `Paid to editor ${targetEditorName} for ${formSelectedProject.coupleName} Wedding film.`
-        };
+        if (studioProjects.length === 0) {
+          // If no projects, log a general ledger entry
+          const paymentData = {
+            entityId: selectedStudioId,
+            entityType: 'studio' as const,
+            projectId: 'general_ledger',
+            projectCoupleName: 'General Studio Payment',
+            amount: paymentAmount,
+            date: paymentDate,
+            paymentMethod,
+            notes: paymentNotes || `Received payment from ${studio.name} for general ledger balance.`
+          };
+          await onLogPayment(paymentData);
+          setPaymentSuccess(`Successfully recorded payment of ₹${paymentAmount.toLocaleString('en-IN')} from ${studio.name} to general ledger!`);
+        } else {
+          // Reconcile across outstanding projects first
+          let remainingPayAmount = paymentAmount;
+          const outstandingProjects = studioProjects.filter(p => (p.remainingBalance || 0) > 0);
 
-        // Save payment entry
-        await onLogPayment(paymentData);
+          // If there are outstanding projects, pay them off in sequence
+          if (outstandingProjects.length > 0) {
+            for (const proj of outstandingProjects) {
+              if (remainingPayAmount <= 0) break;
+              const amountToApply = Math.min(proj.remainingBalance || 0, remainingPayAmount);
+              if (amountToApply > 0) {
+                const paymentData = {
+                  entityId: selectedStudioId,
+                  entityType: 'studio' as const,
+                  projectId: proj.id,
+                  projectCoupleName: proj.coupleName,
+                  amount: amountToApply,
+                  date: paymentDate,
+                  paymentMethod,
+                  notes: paymentNotes || `Received payment for ${proj.coupleName} Wedding film.`
+                };
+                await onLogPayment(paymentData);
 
-        playCinematicChime();
-        setPaymentSuccess(`Successfully logged payout of ₹${paymentAmount.toLocaleString('en-IN')} to editor ${targetEditorName}!`);
+                // Update project balances
+                const newAdvance = (proj.advancePayment || 0) + amountToApply;
+                const newRemaining = Math.max(0, (proj.projectAmount || 0) - newAdvance);
+                await onUpdateProject(proj.id, {
+                  advancePayment: newAdvance,
+                  remainingBalance: newRemaining
+                });
+
+                remainingPayAmount -= amountToApply;
+              }
+            }
+          }
+
+          // If there's still a remaining amount, or if there were no outstanding projects at all,
+          // apply the leftover / payment to the first project
+          if (remainingPayAmount > 0) {
+            const targetProj = outstandingProjects[0] || studioProjects[0];
+            const paymentData = {
+              entityId: selectedStudioId,
+              entityType: 'studio' as const,
+              projectId: targetProj.id,
+              projectCoupleName: targetProj.coupleName,
+              amount: remainingPayAmount,
+              date: paymentDate,
+              paymentMethod,
+              notes: paymentNotes || `Received payment for ${targetProj.coupleName} Wedding film.`
+            };
+            await onLogPayment(paymentData);
+
+            // Update project balances
+            const newAdvance = (targetProj.advancePayment || 0) + remainingPayAmount;
+            const newRemaining = Math.max(0, (targetProj.projectAmount || 0) - newAdvance);
+            await onUpdateProject(targetProj.id, {
+              advancePayment: newAdvance,
+              remainingBalance: newRemaining
+            });
+          }
+
+          playCinematicChime();
+          setPaymentSuccess(`Successfully recorded payment of ₹${paymentAmount.toLocaleString('en-IN')} from ${studio.name}! Reconciled across projects.`);
+        }
+      } else {
+        // editor payout
+        const editor = editors.find(e => e.id === selectedEditorIdToPay);
+        if (!editor) {
+          setPaymentError('Selected editor could not be found.');
+          setIsSubmittingPayment(false);
+          return;
+        }
+
+        const editorProjects = projects.filter(p => p.assignedEditorId === selectedEditorIdToPay || p.secondEditorId === selectedEditorIdToPay);
+
+        if (editorProjects.length === 0) {
+          // Log a general ledger entry for editor
+          const paymentData = {
+            entityId: selectedEditorIdToPay,
+            entityType: 'editor' as const,
+            projectId: 'general_ledger',
+            projectCoupleName: 'General Editor Payout',
+            amount: paymentAmount,
+            date: paymentDate,
+            paymentMethod,
+            notes: paymentNotes || `Paid to editor ${editor.name} for general services.`
+          };
+          await onLogPayment(paymentData);
+          setPaymentSuccess(`Successfully recorded payout of ₹${paymentAmount.toLocaleString('en-IN')} to editor ${editor.name}!`);
+        } else {
+          // Calculate pending balance for this editor on each project, and reconcile
+          let remainingPayAmount = paymentAmount;
+          
+          const projectsWithPending = editorProjects.map(p => {
+            let budget = 0;
+            if (p.isSplitProject) {
+              if (p.assignedEditorId === selectedEditorIdToPay) budget = p.firstEditorShare || 0;
+              else if (p.secondEditorId === selectedEditorIdToPay) budget = p.secondEditorShare || 0;
+            } else {
+              budget = p.editorPayment || 0;
+            }
+
+            const alreadyPaid = payments
+              .filter(pay => pay.projectId === p.id && pay.entityId === selectedEditorIdToPay && pay.entityType === 'editor')
+              .reduce((sum, pay) => sum + (pay.amount || 0), 0);
+
+            const pending = Math.max(0, budget - alreadyPaid);
+            return { p, pending };
+          }).filter(item => item.pending > 0);
+
+          if (projectsWithPending.length > 0) {
+            for (const item of projectsWithPending) {
+              if (remainingPayAmount <= 0) break;
+              const amountToApply = Math.min(item.pending, remainingPayAmount);
+              if (amountToApply > 0) {
+                const paymentData = {
+                  entityId: selectedEditorIdToPay,
+                  entityType: 'editor' as const,
+                  projectId: item.p.id,
+                  projectCoupleName: item.p.coupleName,
+                  amount: amountToApply,
+                  date: paymentDate,
+                  paymentMethod,
+                  notes: paymentNotes || `Paid to editor ${editor.name} for ${item.p.coupleName} Wedding film.`
+                };
+                await onLogPayment(paymentData);
+                remainingPayAmount -= amountToApply;
+              }
+            }
+          }
+
+          if (remainingPayAmount > 0) {
+            const targetProj = projectsWithPending[0]?.p || editorProjects[0];
+            const paymentData = {
+              entityId: selectedEditorIdToPay,
+              entityType: 'editor' as const,
+              projectId: targetProj.id,
+              projectCoupleName: targetProj.coupleName,
+              amount: remainingPayAmount,
+              date: paymentDate,
+              paymentMethod,
+              notes: paymentNotes || `Paid to editor ${editor.name} for ${targetProj.coupleName} Wedding film.`
+            };
+            await onLogPayment(paymentData);
+          }
+
+          playCinematicChime();
+          setPaymentSuccess(`Successfully recorded payout of ₹${paymentAmount.toLocaleString('en-IN')} to editor ${editor.name}! Reconciled across projects.`);
+        }
       }
 
       // Reset form states
@@ -360,6 +512,82 @@ const DashboardView = React.memo(function DashboardView({
   
   const totalExpenses = editorPaymentsTotal + projectExpensesTotal + manualExpensesTotal;
   const totalProfit = totalRevenue - totalExpenses;
+
+  // Overdue Invoices
+  const overdueInvoicesList = useMemo(() => {
+    return (invoices || []).filter(inv => {
+      const isOverdueStatus = inv.status === 'overdue';
+      const isOverdueDate = new Date(inv.dueDate).getTime() < Date.now() && inv.balanceDue > 0 && inv.status !== 'paid';
+      return isOverdueStatus || isOverdueDate;
+    });
+  }, [invoices]);
+
+  // Unpaid Editor Ledger Entries
+  const unpaidEditorsList = useMemo(() => {
+    const list: {
+      editorId: string;
+      editorName: string;
+      projectId: string;
+      coupleName: string;
+      shootDate: string;
+      deliveryDate: string;
+      budget: number;
+      paid: number;
+      pending: number;
+      roleType: string;
+    }[] = [];
+
+    projects.forEach(p => {
+      // Lead Editor
+      if (p.assignedEditorId) {
+        const budget = p.isSplitProject ? (p.firstEditorShare || 0) : (p.editorPayment || 0);
+        const paid = payments
+          .filter(pay => pay.projectId === p.id && pay.entityId === p.assignedEditorId && pay.entityType === 'editor')
+          .reduce((sum, pay) => sum + (pay.amount || 0), 0);
+        const pending = budget - paid;
+        if (pending > 0) {
+          list.push({
+            editorId: p.assignedEditorId,
+            editorName: p.assignedEditorName || 'Unassigned',
+            projectId: p.id,
+            coupleName: p.coupleName || 'Wedding Film',
+            shootDate: p.shootDate,
+            deliveryDate: p.deliveryDate,
+            budget,
+            paid,
+            pending,
+            roleType: p.isSplitProject ? 'Lead Share' : 'Lead Editor'
+          });
+        }
+      }
+
+      // Split/Second Editor
+      if (p.isSplitProject && p.secondEditorId) {
+        const budget = p.secondEditorShare || 0;
+        const paid = payments
+          .filter(pay => pay.projectId === p.id && pay.entityId === p.secondEditorId && pay.entityType === 'editor')
+          .reduce((sum, pay) => sum + (pay.amount || 0), 0);
+        const pending = budget - paid;
+        if (pending > 0) {
+          list.push({
+            editorId: p.secondEditorId,
+            editorName: p.secondEditorName || 'Unassigned',
+            projectId: p.id,
+            coupleName: p.coupleName || 'Wedding Film',
+            shootDate: p.shootDate,
+            deliveryDate: p.deliveryDate,
+            budget,
+            paid,
+            pending,
+            roleType: 'Second Editor Share'
+          });
+        }
+      }
+    });
+    return list;
+  }, [projects, payments]);
+
+  const totalNeedsAttentionCount = overdueInvoicesList.length + unpaidEditorsList.length;
 
   const activeStudiosCount = studios.length;
   const activeEditorsCount = editors.length;
@@ -431,6 +659,56 @@ const DashboardView = React.memo(function DashboardView({
     { name: 'May', Revenue: totalRevenue * 0.22, Profit: totalProfit * 0.23 },
     { name: 'Jun', Revenue: totalRevenue * 0.19, Profit: totalProfit * 0.23 },
   ];
+
+  // Dynamic monthly project completion & inflow trends for Sparkline charts
+  const sparklineData = useMemo(() => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const now = new Date();
+    const list = [];
+    
+    // Last 6 calendar months in chronological order
+    for (let i = 5; i >= 0; i--) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mIdx = targetDate.getMonth();
+      const yr = targetDate.getFullYear();
+      const monthLabel = months[mIdx];
+      const prefix = `${yr}-${String(mIdx + 1).padStart(2, '0')}`;
+      
+      // Projects completed (delivered/closed) in this month
+      const completedCount = projects.filter(p => {
+        const isCompleted = p.status === 'delivered' || p.status === 'closed';
+        if (!isCompleted) return false;
+        const dateStr = p.deliveryDate || p.shootDate;
+        return dateStr && dateStr.startsWith(prefix);
+      }).length;
+
+      // Total projects received / registered in this month
+      const totalCount = projects.filter(p => {
+        const dateStr = p.shootDate || p.deliveryDate;
+        return dateStr && dateStr.startsWith(prefix);
+      }).length;
+
+      list.push({
+        month: monthLabel,
+        completed: completedCount,
+        total: totalCount,
+      });
+    }
+
+    // Fallback if there are absolutely no projects registered to maintain elegant UI presentation
+    const hasData = projects.length > 0;
+    if (!hasData) {
+      return [
+        { month: 'Feb', completed: 2, total: 3 },
+        { month: 'Mar', completed: 4, total: 5 },
+        { month: 'Apr', completed: 3, total: 6 },
+        { month: 'May', completed: 6, total: 8 },
+        { month: 'Jun', completed: 5, total: 7 },
+        { month: 'Jul', completed: 8, total: 10 }
+      ];
+    }
+    return list;
+  }, [projects]);
 
   // Studio Performance Data
   const studioPerformanceData = studios.map(studio => {
@@ -1024,6 +1302,328 @@ const DashboardView = React.memo(function DashboardView({
     );
   };
 
+  const renderNeedsAttention = () => {
+    return (
+      <div className="p-6 rounded-3xl bg-charcoal-900/60 border border-luxury-green-800/15 backdrop-blur-md space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <div className={`p-2.5 rounded-2xl ${totalNeedsAttentionCount > 0 ? 'bg-red-500/10 border border-red-500/20 text-red-400' : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'}`}>
+              {totalNeedsAttentionCount > 0 ? <AlertTriangle className="w-5 h-5 animate-pulse" /> : <CheckCircle className="w-5 h-5" />}
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-base font-bold text-white tracking-tight font-display">Attention Overview Hub</h2>
+                {totalNeedsAttentionCount > 0 ? (
+                  <span className="text-[9px] font-mono tracking-widest px-2 py-0.5 bg-red-500/10 text-red-400 border border-red-500/25 rounded-full uppercase font-bold">
+                    Needs Attention
+                  </span>
+                ) : (
+                  <span className="text-[9px] font-mono tracking-widest px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 rounded-full uppercase font-bold">
+                    All Clear
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-gray-400 font-mono mt-0.5 uppercase">Identifies overdue partner invoices & unpaid editor ledger balances</p>
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <span className="text-2xl font-sans font-extrabold text-white">{totalNeedsAttentionCount}</span>
+            <span className="text-xs text-gray-400 block font-mono">Dues Requiring Action</span>
+          </div>
+        </div>
+
+        {totalNeedsAttentionCount > 0 ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Column 1: Overdue Invoices */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider flex items-center space-x-1.5">
+                  <FileText className="w-3.5 h-3.5 text-red-400" />
+                  <span>Overdue Studio Invoices ({overdueInvoicesList.length})</span>
+                </span>
+                <span className="text-[10px] font-mono text-red-400 font-semibold">
+                  ₹{overdueInvoicesList.reduce((sum, inv) => sum + (inv.balanceDue || 0), 0).toLocaleString('en-IN')} pending
+                </span>
+              </div>
+
+              {overdueInvoicesList.length > 0 ? (
+                <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1 scrollbar-thin">
+                  {overdueInvoicesList.map((inv) => {
+                    const studio = studios.find(s => s.id === inv.studioId);
+                    return (
+                      <div key={inv.id} className="p-3 rounded-xl bg-black/40 border border-red-500/10 hover:border-red-500/20 transition-colors flex justify-between items-center text-xs">
+                        <div className="min-w-0 pr-2">
+                          <div className="flex items-center space-x-1.5">
+                            <span className="font-bold text-gray-200 truncate">{studio?.name || 'Studio Partner'}</span>
+                            <span className="text-[9px] font-mono bg-red-500/10 text-red-400 border border-red-500/20 px-1 rounded">Overdue</span>
+                          </div>
+                          <p className="text-[10px] text-gray-400 truncate mt-0.5">Couple: {inv.coupleName || 'Wedding Film'}</p>
+                          <div className="flex items-center space-x-2 mt-1 text-[9px] text-gray-500 font-mono">
+                            <span className="flex items-center gap-1"><Clock className="w-2.5 h-2.5" /> Due: {inv.dueDate}</span>
+                            <span>•</span>
+                            <span>Inv: {inv.id}</span>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="font-sans font-bold text-red-400">₹{inv.balanceDue?.toLocaleString('en-IN')}</p>
+                          <p className="text-[9px] text-gray-500 mt-0.5 font-mono">Total: ₹{inv.totalAmount?.toLocaleString('en-IN')}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-xs italic font-mono py-4 text-center">No overdue invoices found. Excellent!</p>
+              )}
+            </div>
+
+            {/* Column 2: Unpaid Editor Balances */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider flex items-center space-x-1.5">
+                  <User className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Unpaid Editor Wages ({unpaidEditorsList.length})</span>
+                </span>
+                <span className="text-[10px] font-mono text-amber-400 font-semibold">
+                  ₹{unpaidEditorsList.reduce((sum, item) => sum + item.pending, 0).toLocaleString('en-IN')} outstanding
+                </span>
+              </div>
+
+              {unpaidEditorsList.length > 0 ? (
+                <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1 scrollbar-thin">
+                  {unpaidEditorsList.map((item, idx) => {
+                    return (
+                      <div key={`${item.projectId}-${item.editorId}-${idx}`} className="p-3 rounded-xl bg-black/40 border border-amber-500/10 hover:border-amber-500/20 transition-colors flex justify-between items-center text-xs">
+                        <div className="min-w-0 pr-2">
+                          <div className="flex items-center space-x-1.5">
+                            <span className="font-bold text-gray-200 truncate">{item.editorName}</span>
+                            <span className="text-[9px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1 rounded">{item.roleType}</span>
+                          </div>
+                          <p className="text-[10px] text-gray-400 truncate mt-0.5">Project: {item.coupleName}</p>
+                          <div className="flex items-center space-x-2 mt-1 text-[9px] text-gray-500 font-mono">
+                            <span className="flex items-center gap-1"><Clock className="w-2.5 h-2.5" /> Est. Delivery: {item.deliveryDate || 'N/A'}</span>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="font-sans font-bold text-amber-400">₹{item.pending.toLocaleString('en-IN')}</p>
+                          <p className="text-[9px] text-gray-500 mt-0.5 font-mono">Paid: ₹{item.paid.toLocaleString('en-IN')} of ₹{item.budget.toLocaleString('en-IN')}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-xs italic font-mono py-4 text-center">No outstanding editor balances found.</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="p-5 rounded-2xl bg-[#1e5546]/10 border border-luxury-green-500/20 flex flex-col items-center justify-center text-center py-8">
+            <CheckCircle className="w-10 h-10 text-emerald-400 mb-2.5" />
+            <h4 className="text-xs font-bold text-emerald-300 font-mono uppercase tracking-wide">All Balances Settled Perfectly</h4>
+            <p className="text-[10px] text-emerald-400/70 mt-1 max-w-md">Every client invoice has been paid on-time and all editor wages are settled. Operational cashflow is perfectly balanced.</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderProjectCompletionSparklines = (isOrganic = false) => {
+    const maxCompleted = Math.max(...sparklineData.map(d => d.completed), 1);
+    const maxTotal = Math.max(...sparklineData.map(d => d.total), 1);
+    const totalCompletionsLast6M = sparklineData.reduce((sum, d) => sum + d.completed, 0);
+    const totalIntakeLast6M = sparklineData.reduce((sum, d) => sum + d.total, 0);
+    
+    const overallDeliveryRate = totalIntakeLast6M > 0 
+      ? Math.round((totalCompletionsLast6M / totalIntakeLast6M) * 100) 
+      : 100;
+
+    const panelBg = isOrganic 
+      ? "bg-charcoal-900/60 border-luxury-green-800/15" 
+      : "glass-panel border-luxury-green-800/10";
+
+    return (
+      <div className={`p-6 rounded-3xl ${panelBg} border shadow-md space-y-6`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <Activity className="w-4 h-4 text-emerald-400" />
+              </span>
+              <h2 className="text-base font-bold text-white tracking-tight font-display">Workflow & Delivery Sparklines</h2>
+            </div>
+            <p className="text-[10px] text-gray-400 font-mono mt-1 uppercase">Monthly high-density project analytics (Last 6 Months)</p>
+          </div>
+          <div className="flex items-center gap-4 bg-black/30 px-4 py-2 rounded-2xl border border-white/5 shrink-0">
+            <div className="text-center">
+              <span className="text-[9px] text-gray-400 block font-mono">DELIVERY RATE</span>
+              <span className="text-base font-bold text-emerald-400 font-sans">{overallDeliveryRate}%</span>
+            </div>
+            <div className="w-[1px] h-8 bg-white/10" />
+            <div className="text-center">
+              <span className="text-[9px] text-gray-400 block font-mono">6M CLOSED</span>
+              <span className="text-base font-bold text-white font-sans">{totalCompletionsLast6M}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Card 1: Completed Sparkline */}
+          <div className="p-4 rounded-2xl bg-black/30 border border-white/5 flex flex-col justify-between h-36">
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wider block">Project Deliveries</span>
+                <span className="text-2xl font-bold text-white tracking-tight mt-0.5 block">{totalCompletionsLast6M} Films</span>
+              </div>
+              <span className="text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase font-semibold">
+                Completed
+              </span>
+            </div>
+
+            {/* Sparkline chart container */}
+            <div className="h-12 w-full mt-3">
+              <ResponsiveContainer width="100%" height={48} minWidth={100}>
+                <LineChart data={sparklineData} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div className="bg-[#11141a] border border-emerald-500/30 px-2 py-1 rounded-lg text-[9px] font-mono text-gray-200">
+                            <p>{payload[0].payload.month}: <span className="text-emerald-400 font-bold">{payload[0].value} completed</span></p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="completed" 
+                    stroke="#10b981" 
+                    strokeWidth={2.5} 
+                    dot={{ r: 2, fill: '#10b981', strokeWidth: 0 }}
+                    activeDot={{ r: 4, strokeWidth: 0 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="flex justify-between items-center text-[9px] text-gray-500 font-mono mt-1 border-t border-white/5 pt-1.5">
+              <span>{sparklineData[0]?.month}</span>
+              <span>Peak: {maxCompleted} / mo</span>
+              <span>{sparklineData[sparklineData.length - 1]?.month}</span>
+            </div>
+          </div>
+
+          {/* Card 2: Received Sparkline */}
+          <div className="p-4 rounded-2xl bg-black/30 border border-white/5 flex flex-col justify-between h-36">
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wider block">Wedding Intake</span>
+                <span className="text-2xl font-bold text-white tracking-tight mt-0.5 block">{totalIntakeLast6M} Received</span>
+              </div>
+              <span className="text-[9px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full uppercase font-semibold">
+                Inflow
+              </span>
+            </div>
+
+            {/* Sparkline chart container */}
+            <div className="h-12 w-full mt-3">
+              <ResponsiveContainer width="100%" height={48} minWidth={100}>
+                <LineChart data={sparklineData} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div className="bg-[#11141a] border border-blue-500/30 px-2 py-1 rounded-lg text-[9px] font-mono text-gray-200">
+                            <p>{payload[0].payload.month}: <span className="text-blue-400 font-bold">{payload[0].value} received</span></p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="total" 
+                    stroke="#3b82f6" 
+                    strokeWidth={2.5} 
+                    dot={{ r: 2, fill: '#3b82f6', strokeWidth: 0 }}
+                    activeDot={{ r: 4, strokeWidth: 0 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="flex justify-between items-center text-[9px] text-gray-500 font-mono mt-1 border-t border-white/5 pt-1.5">
+              <span>{sparklineData[0]?.month}</span>
+              <span>Peak: {maxTotal} / mo</span>
+              <span>{sparklineData[sparklineData.length - 1]?.month}</span>
+            </div>
+          </div>
+
+          {/* Card 3: Dual Sparkline Trend Overlay */}
+          <div className="p-4 rounded-2xl bg-black/30 border border-white/5 flex flex-col justify-between h-36">
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-[10px] font-mono text-gray-400 uppercase tracking-wider block">Overlay Analytics</span>
+                <span className="text-xs text-gray-300 mt-1 block">Inflow vs. Completion</span>
+              </div>
+              <div className="flex gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5" />
+                <span className="text-[8px] text-gray-400 font-mono mr-1.5">Delivered</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1.5" />
+                <span className="text-[8px] text-gray-400 font-mono font-sans">Inflow</span>
+              </div>
+            </div>
+
+            {/* Area Sparkline overlay container */}
+            <div className="h-12 w-full mt-3">
+              <ResponsiveContainer width="100%" height={48} minWidth={100}>
+                <LineChart data={sparklineData} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div className="bg-[#11141a] border border-white/10 p-2 rounded-lg text-[9px] font-mono text-gray-200 space-y-0.5">
+                            <p className="font-bold border-b border-white/5 pb-0.5">{payload[0].payload.month}</p>
+                            <p className="text-emerald-400">Completed: {payload[0].payload.completed}</p>
+                            <p className="text-blue-400">Received: {payload[0].payload.total}</p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="completed" 
+                    stroke="#10b981" 
+                    strokeWidth={2} 
+                    dot={false}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="total" 
+                    stroke="#3b82f6" 
+                    strokeWidth={2} 
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="flex justify-between items-center text-[9px] text-gray-500 font-mono mt-1 border-t border-white/5 pt-1.5">
+              <span>{sparklineData[0]?.month}</span>
+              <span>Efficiency Index</span>
+              <span>{sparklineData[sparklineData.length - 1]?.month}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Computed Search Results across Projects, Studios, and Editors
   const searchResultsProjects = globalSearchQuery.trim() === '' ? [] : projects.filter(p => 
     p.coupleName?.toLowerCase().includes(globalSearchQuery.toLowerCase()) ||
@@ -1061,9 +1661,9 @@ const DashboardView = React.memo(function DashboardView({
         <div className="p-5 rounded-3xl bg-gradient-to-br from-[#0c2a1d] to-[#12161a] border border-luxury-green-800/20 shadow-lg relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-gold-400/5 rounded-full blur-2xl pointer-events-none" />
           <div className="flex items-center space-x-4">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-gold-600 to-gold-400 p-[1.5px] shadow-md shrink-0">
-              <div className="w-full h-full bg-charcoal-950 rounded-full flex items-center justify-center font-serif italic text-gold-400 font-bold text-lg">
-                ST
+            <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-gold-600 to-gold-400 p-[1.5px] shadow-md shrink-0 flex items-center justify-center">
+              <div className="w-full h-full bg-charcoal-950 rounded-full flex items-center justify-center">
+                <Logo size={28} variant="gold" />
               </div>
             </div>
             <div className="min-w-0 flex-1">
@@ -1215,6 +1815,12 @@ const DashboardView = React.memo(function DashboardView({
             </div>
           </div>
         </div>
+
+        {/* NEEDS ATTENTION FOR MOBILE DASHBOARD */}
+        {renderNeedsAttention()}
+
+        {/* WORKFLOW SPARKLINES FOR MOBILE DASHBOARD */}
+        {renderProjectCompletionSparklines(true)}
 
         {/* Compact Tabbed Reminders Hub */}
         <div className="p-4 rounded-3xl bg-charcoal-900/90 border border-luxury-green-800/10 shadow-lg space-y-4">
@@ -1644,13 +2250,18 @@ const DashboardView = React.memo(function DashboardView({
               </div>
 
               {/* Middle Row: Luxury Brand Titles */}
-              <div className="relative z-10 my-6 max-w-2xl">
-                <h1 className="text-4xl md:text-6xl font-serif italic text-white tracking-tight leading-tight">
-                  The Frame Cut Studio
-                </h1>
-                <p className="text-gray-300 font-sans text-sm md:text-base font-light mt-4 leading-relaxed max-w-lg">
-                  Where elegant wedding cinematic masterpieces meet structured, organic workflow management. Synced in cloud-realtime.
-                </p>
+              <div className="relative z-10 my-6 flex flex-col md:flex-row md:items-center justify-between gap-8 w-full">
+                <div className="max-w-2xl">
+                  <h1 className="text-4xl md:text-6xl font-serif italic text-white tracking-tight leading-tight">
+                    The Frame Cut Studio
+                  </h1>
+                  <p className="text-gray-300 font-sans text-sm md:text-base font-light mt-4 leading-relaxed max-w-lg">
+                    Where elegant wedding cinematic masterpieces meet structured, organic workflow management. Synced in cloud-realtime.
+                  </p>
+                </div>
+                <div className="hidden md:flex flex-col items-center justify-center p-6 rounded-3xl bg-black/20 border border-white/5 backdrop-blur-sm shadow-xl shrink-0">
+                  <Logo size={110} variant="gold" showText={true} />
+                </div>
               </div>
 
               {/* Bottom Row: Premium Sand Capsule Button & Stats */}
@@ -1733,15 +2344,15 @@ const DashboardView = React.memo(function DashboardView({
             {/* BOTTOM SECTION: THE NATURE BENTO GRID */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               
-              {/* CARD 1: SOFT MINT GREEN CARD */}
-              <div className="organic-green-leaf-gradient organic-leaf-round-md p-6 flex flex-col justify-between h-[320px] shadow-lg relative overflow-hidden leaf-border-glow">
+              {/* CARD 1: EARTH SOIL BROWN CARD (Active Pipeline) */}
+              <div className="organic-soil-brown-gradient organic-leaf-round-md p-6 flex flex-col justify-between h-[320px] shadow-lg relative overflow-hidden leaf-border-glow">
                 <div className="absolute top-3 right-3 opacity-15">
                   <Flower className="w-24 h-24 text-white animate-spin-slow" />
                 </div>
                 
                 <div className="flex justify-between items-start relative z-10">
                   <div>
-                    <span className="text-[10px] uppercase font-mono text-emerald-300 tracking-wider">Active Pipeline</span>
+                    <span className="text-[10px] uppercase font-mono text-amber-200 tracking-wider">Active Pipeline</span>
                     <h3 className="text-lg font-serif italic text-white mt-0.5">Stare Seador Overview</h3>
                   </div>
                   <div className="p-2 rounded-full bg-white/10">
@@ -1752,11 +2363,11 @@ const DashboardView = React.memo(function DashboardView({
                 <div className="my-4 relative z-10">
                   <div className="flex items-baseline space-x-2">
                     <span className="text-4xl font-sans font-extrabold text-white tracking-tight">{pendingProjectsCount}</span>
-                    <span className="text-xs text-emerald-300">Film Cuts Running</span>
+                    <span className="text-xs text-amber-200">Film Cuts Running</span>
                   </div>
                   
                   <div className="mt-4 space-y-2">
-                    <div className="flex justify-between text-[11px] text-emerald-200">
+                    <div className="flex justify-between text-[11px] text-amber-200">
                       <span>Editing Completed</span>
                       <span>{((completedProjectsCount / (totalProjectsCount || 1)) * 100).toFixed(0)}%</span>
                     </div>
@@ -1769,7 +2380,7 @@ const DashboardView = React.memo(function DashboardView({
                   </div>
                 </div>
 
-                <div className="border-t border-white/10 pt-3 relative z-10 flex justify-between items-center text-[10px] text-emerald-300 font-mono">
+                <div className="border-t border-white/10 pt-3 relative z-10 flex justify-between items-center text-[10px] text-amber-200 font-mono">
                   <span>Completed: {completedProjectsCount} Cuts</span>
                   <span>Total: {totalProjectsCount} films</span>
                 </div>
@@ -2064,6 +2675,12 @@ const DashboardView = React.memo(function DashboardView({
 
             </div>
 
+            {/* NEEDS ATTENTION FOR ORGANIC THEME */}
+            {renderNeedsAttention()}
+
+            {/* WORKFLOW SPARKLINES FOR ORGANIC THEME */}
+            {renderProjectCompletionSparklines(true)}
+
             {/* REMINDERS HUB FOR ORGANIC THEME */}
             {renderRemindersHub(true)}
 
@@ -2082,24 +2699,27 @@ const DashboardView = React.memo(function DashboardView({
       <div className="flex flex-col md:flex-row md:items-center justify-between p-8 rounded-3xl glass-panel relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-40 bg-gradient-to-br from-luxury-green-700/10 to-gold-500/10 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse-slow" />
         
-        <div>
-          <div className="flex items-center space-x-3">
-            <span className="text-xs font-mono px-3 py-1 bg-gold-500/10 border border-gold-500/30 text-gold-400 rounded-full uppercase tracking-wider">
-              Wedding ERP Suite
-            </span>
-            <span className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full flex items-center space-x-1 ${
-              isOnline ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/30'
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full mr-1.5 animate-pulse ${isOnline ? 'bg-emerald-400' : 'bg-yellow-500'}`} />
-              {isOnline ? 'Cloud Synced' : 'Offline Mode'}
-            </span>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+          <Logo size={64} variant="gold" className="shrink-0" />
+          <div>
+            <div className="flex items-center space-x-3">
+              <span className="text-xs font-mono px-3 py-1 bg-gold-500/10 border border-gold-500/30 text-gold-400 rounded-full uppercase tracking-wider">
+                Wedding ERP Suite
+              </span>
+              <span className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full flex items-center space-x-1 ${
+                isOnline ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/30'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full mr-1.5 animate-pulse ${isOnline ? 'bg-emerald-400' : 'bg-yellow-500'}`} />
+                {isOnline ? 'Cloud Synced' : 'Offline Mode'}
+              </span>
+            </div>
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white font-display mt-2">
+              The Frame Cut Studio OS
+            </h1>
+            <p className="text-gray-400 text-sm mt-1 max-w-xl">
+              Welcome, <strong className="text-gold-400">Satish Tiwari</strong>. Manage cinematic workflows, studio ledgers, revisions, and invoices from one unified hub.
+            </p>
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white font-display mt-2">
-            The Frame Cut Studio OS
-          </h1>
-          <p className="text-gray-400 text-sm mt-1 max-w-xl">
-            Welcome, <strong className="text-gold-400">Satish Tiwari</strong>. Manage cinematic workflows, studio ledgers, revisions, and invoices from one unified hub.
-          </p>
         </div>
 
         {/* Quick action grid */}
@@ -2162,6 +2782,11 @@ const DashboardView = React.memo(function DashboardView({
         })}
       </div>
 
+      {/* WORKFLOW SPARKLINES FOR CLASSIC THEME */}
+      <motion.div id="workflow-sparklines" variants={itemVariants}>
+        {renderProjectCompletionSparklines(false)}
+      </motion.div>
+
       {/* Main Charts & Sidebars */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         
@@ -2178,7 +2803,7 @@ const DashboardView = React.memo(function DashboardView({
           </div>
           
           <div className="h-80 w-full">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height={320} minWidth={100}>
               <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
@@ -2307,7 +2932,7 @@ const DashboardView = React.memo(function DashboardView({
           
           <div className="h-64">
             {studioPerformanceData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={256} minWidth={100}>
                 <BarChart data={studioPerformanceData} layout="vertical" margin={{ top: 10, right: 10, left: 10, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(30, 85, 70, 0.05)" horizontal={false} />
                   <XAxis type="number" stroke="#6b7280" fontSize={10} tickLine={false} />
@@ -2338,7 +2963,7 @@ const DashboardView = React.memo(function DashboardView({
 
           <div className="h-64">
             {editorPerformanceData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={256} minWidth={100}>
                 <BarChart data={editorPerformanceData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(30, 85, 70, 0.05)" />
                   <XAxis dataKey="name" stroke="#6b7280" fontSize={11} tickLine={false} />
@@ -2361,6 +2986,9 @@ const DashboardView = React.memo(function DashboardView({
           </div>
         </motion.div>
       </div>
+
+      {/* NEEDS ATTENTION FOR CLASSIC THEME */}
+      {renderNeedsAttention()}
 
       {/* REMINDERS HUB FOR CLASSIC THEME */}
       {renderRemindersHub(false)}
@@ -2424,6 +3052,7 @@ const DashboardView = React.memo(function DashboardView({
                       type="button"
                       onClick={() => {
                         setPaymentType('studio');
+                        setSelectedStudioId('');
                         setSelectedProjectId('');
                         setPaymentAmount(0);
                         setPaymentError('');
@@ -2441,6 +3070,7 @@ const DashboardView = React.memo(function DashboardView({
                       type="button"
                       onClick={() => {
                         setPaymentType('editor');
+                        setSelectedStudioId('');
                         setSelectedProjectId('');
                         setPaymentAmount(0);
                         setPaymentError('');
@@ -2457,162 +3087,124 @@ const DashboardView = React.memo(function DashboardView({
                   </div>
                 </div>
 
-                {/* 2. Select Project */}
+                {/* 2. Select Studio or Editor Partner */}
                 <div>
                   <label className="block text-[10px] font-mono text-gray-400 uppercase tracking-wider mb-2">
-                    {paymentType === 'studio' ? 'Select Studio Partner' : 'Select Studio (For Editor Payout)'}
+                    {paymentType === 'studio' ? 'Select Studio Partner' : 'Select Video Editor'}
                   </label>
-                  <select
-                    value={selectedProjectId}
-                    onChange={(e) => {
-                      setSelectedProjectId(e.target.value);
-                      setPaymentError('');
-                      setPaymentSuccess('');
-                    }}
-                    required
-                    className="w-full bg-charcoal-950/80 border border-white/10 rounded-2xl p-3 text-sm text-white focus:outline-none focus:border-gold-500/40 font-medium"
-                  >
-                    <option value="" disabled>
-                      {paymentType === 'studio' ? '-- Choose Studio Partner --' : '-- Choose Studio --'}
-                    </option>
-                    {projects
-                      .filter(p => paymentType === 'studio' ? true : (!!p.assignedEditorId || !!p.secondEditorId))
-                      .map((p) => {
-                        let edPending = 0;
-                        if (p.isSplitProject) {
-                          const p1Paid = p.assignedEditorId
-                            ? payments
-                                .filter(pay => pay.projectId === p.id && pay.entityId === p.assignedEditorId && pay.entityType === 'editor')
-                                .reduce((sum, pay) => sum + (pay.amount || 0), 0)
-                            : 0;
-                          const p2Paid = p.secondEditorId
-                            ? payments
-                                .filter(pay => pay.projectId === p.id && pay.entityId === p.secondEditorId && pay.entityType === 'editor')
-                                .reduce((sum, pay) => sum + (pay.amount || 0), 0)
-                            : 0;
-                          const p1Pending = Math.max(0, (p.firstEditorShare || 0) - p1Paid);
-                          const p2Pending = Math.max(0, (p.secondEditorShare || 0) - p2Paid);
-                          edPending = p1Pending + p2Pending;
-                        } else {
-                          const edPaid = p.assignedEditorId
-                            ? payments
-                                .filter(pay => pay.projectId === p.id && pay.entityId === p.assignedEditorId && pay.entityType === 'editor')
-                                .reduce((sum, pay) => sum + (pay.amount || 0), 0)
-                            : 0;
-                          edPending = Math.max(0, (p.editorPayment || 0) - edPaid);
-                        }
-
-                        return (
-                          <option key={p.id} value={p.id} className="bg-charcoal-950 text-white">
-                            {paymentType === 'studio'
-                              ? `${p.studioName} (Outstanding: ₹${(p.remainingBalance || 0).toLocaleString('en-IN')})`
-                              : `${p.studioName} (Editor Pending: ₹${edPending.toLocaleString('en-IN')})`
-                            }
-                          </option>
-                        );
-                      })
-                    }
-                  </select>
-                </div>
-
-                {/* 2.5 Select Split Editor (For split projects) */}
-                {paymentType === 'editor' && formSelectedProject?.isSplitProject && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    className="p-3.5 bg-charcoal-950/80 border border-gold-500/10 rounded-2xl space-y-2"
-                  >
-                    <label className="block text-[10px] font-mono text-gold-400 uppercase tracking-wider">
-                      Select Target Editor for Payout
-                    </label>
+                  {paymentType === 'studio' ? (
+                    <select
+                      value={selectedStudioId}
+                      onChange={(e) => {
+                        setSelectedStudioId(e.target.value);
+                        setPaymentError('');
+                        setPaymentSuccess('');
+                      }}
+                      required
+                      className="w-full bg-charcoal-950/80 border border-white/10 rounded-2xl p-3 text-sm text-white focus:outline-none focus:border-gold-500/40 font-medium"
+                    >
+                      <option value="" disabled>
+                        -- Choose Studio Partner --
+                      </option>
+                      {studios.map((s) => (
+                        <option key={s.id} value={s.id} className="bg-charcoal-950 text-white">
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
                     <select
                       value={selectedEditorIdToPay}
-                      onChange={(e) => setSelectedEditorIdToPay(e.target.value)}
+                      onChange={(e) => {
+                        setSelectedEditorIdToPay(e.target.value);
+                        setPaymentError('');
+                        setPaymentSuccess('');
+                      }}
                       required
-                      className="w-full bg-charcoal-900 border border-white/5 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-gold-500/40"
+                      className="w-full bg-charcoal-950/80 border border-white/10 rounded-2xl p-3 text-sm text-white focus:outline-none focus:border-gold-500/40 font-medium"
                     >
-                      {formSelectedProject.assignedEditorId && (
-                        <option value={formSelectedProject.assignedEditorId}>
-                          👤 Lead Editor: {formSelectedProject.assignedEditorName} (Budget: ₹{(formSelectedProject.firstEditorShare || 0).toLocaleString('en-IN')})
+                      <option value="" disabled>
+                        -- Choose Video Editor --
+                      </option>
+                      {editors.map((e) => (
+                        <option key={e.id} value={e.id} className="bg-charcoal-950 text-white">
+                          {e.name}
                         </option>
-                      )}
-                      {formSelectedProject.secondEditorId && (
-                        <option value={formSelectedProject.secondEditorId}>
-                          👤 Secondary Editor: {formSelectedProject.secondEditorName} (Budget: ₹{(formSelectedProject.secondEditorShare || 0).toLocaleString('en-IN')})
-                        </option>
-                      )}
+                      ))}
                     </select>
-                  </motion.div>
-                )}
-                
-                {/* 3. Real-time Project Financial Summary Display */}
-                {formSelectedProject && (
+                  )}
+                </div>
+
+                {/* 3. Real-time Consolidated Financial Summary Display */}
+                {paymentType === 'studio' && studioFinancialSummary && (
                   <motion.div
                     initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="p-4 bg-charcoal-950/60 rounded-2xl border border-white/5 space-y-2.5 text-xs text-gray-300"
                   >
                     <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                      <span className="font-semibold text-white">Project Financial State:</span>
-                      <span className="text-[10px] text-gold-400 font-mono uppercase">{formSelectedProject.id}</span>
+                      <span className="font-semibold text-white">Studio Consolidated Balance Ledger:</span>
+                      <span className="text-[10px] text-gold-400 font-mono uppercase">{studioFinancialSummary.projectCount} Projects</span>
                     </div>
-
-                    {paymentType === 'studio' ? (
-                      <div className="grid grid-cols-3 gap-4 text-center">
-                        <div className="p-2 bg-black/20 rounded-xl">
-                          <div className="text-[9px] text-gray-400 uppercase font-mono">Contract Amount</div>
-                          <div className="font-bold text-white mt-0.5">₹{formSelectedProject.projectAmount?.toLocaleString('en-IN')}</div>
-                        </div>
-                        <div className="p-2 bg-black/20 rounded-xl">
-                          <div className="text-[9px] text-gray-400 uppercase font-mono">Advance Received</div>
-                          <div className="font-bold text-emerald-400 mt-0.5">₹{formSelectedProject.advancePayment?.toLocaleString('en-IN')}</div>
-                        </div>
-                        <div className="p-2 bg-black/20 rounded-xl">
-                          <div className="text-[9px] text-gray-400 uppercase font-mono">Outstanding Balance</div>
-                          <div className="font-bold text-amber-500 mt-0.5">₹{formSelectedProject.remainingBalance?.toLocaleString('en-IN')}</div>
-                        </div>
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                      <div className="p-2 bg-black/20 rounded-xl">
+                        <div className="text-[9px] text-gray-400 uppercase font-mono">Total Contracts</div>
+                        <div className="font-bold text-white mt-0.5">₹{studioFinancialSummary.totalContract.toLocaleString('en-IN')}</div>
                       </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="flex justify-between">
-                          <span className="text-gray-400">Target Editor:</span>
-                          <span className="font-semibold text-white">
-                            {selectedEditorIdToPay === formSelectedProject.assignedEditorId
-                              ? (formSelectedProject.assignedEditorName || 'Unassigned')
-                              : (formSelectedProject.secondEditorName || 'Unassigned')
-                            }
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-4 text-center">
-                          <div className="p-2 bg-black/20 rounded-xl">
-                            <div className="text-[9px] text-gray-400 uppercase font-mono">Editor Budget</div>
-                            <div className="font-bold text-white mt-0.5">₹{editorTargetPayment.toLocaleString('en-IN')}</div>
-                          </div>
-                          <div className="p-2 bg-black/20 rounded-xl">
-                            <div className="text-[9px] text-gray-400 uppercase font-mono">Paid To Date</div>
-                            <div className="font-bold text-emerald-400 mt-0.5">₹{editorAlreadyPaid?.toLocaleString('en-IN')}</div>
-                          </div>
-                          <div className="p-2 bg-black/20 rounded-xl">
-                            <div className="text-[9px] text-gray-400 uppercase font-mono">Pending Balance</div>
-                            <div className="font-bold text-amber-500 mt-0.5">₹{Math.max(0, editorTargetPayment - editorAlreadyPaid).toLocaleString('en-IN')}</div>
-                          </div>
-                        </div>
+                      <div className="p-2 bg-black/20 rounded-xl">
+                        <div className="text-[9px] text-gray-400 uppercase font-mono">Advance Received</div>
+                        <div className="font-bold text-emerald-400 mt-0.5">₹{studioFinancialSummary.totalReceived.toLocaleString('en-IN')}</div>
                       </div>
-                    )}
+                      <div className="p-2 bg-black/20 rounded-xl">
+                        <div className="text-[9px] text-gray-400 uppercase font-mono">Net Outstanding</div>
+                        <div className="font-bold text-amber-500 mt-0.5">₹{studioFinancialSummary.totalOutstanding.toLocaleString('en-IN')}</div>
+                      </div>
+                    </div>
 
                     {/* Calculated Outcome */}
                     {paymentAmount > 0 && (
                       <div className="mt-2 pt-2 border-t border-dashed border-white/10 flex justify-between items-center text-[11px] font-mono">
-                        <span className="text-gray-400">Balance after this transaction:</span>
-                        {paymentType === 'studio' ? (
-                          <span className="font-bold text-emerald-400">
-                            ₹{Math.max(0, (formSelectedProject.remainingBalance || 0) - paymentAmount).toLocaleString('en-IN')} Outstanding
-                          </span>
-                        ) : (
-                          <span className="font-bold text-amber-400">
-                            ₹{Math.max(0, (editorTargetPayment - editorAlreadyPaid) - paymentAmount).toLocaleString('en-IN')} Pending
-                          </span>
-                        )}
+                        <span className="text-gray-400">Projected Outstanding after this payment:</span>
+                        <span className="font-bold text-emerald-400">
+                          ₹{Math.max(0, studioFinancialSummary.totalOutstanding - paymentAmount).toLocaleString('en-IN')} Outstanding
+                        </span>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+
+                {paymentType === 'editor' && editorFinancialSummary && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 bg-charcoal-950/60 rounded-2xl border border-white/5 space-y-2.5 text-xs text-gray-300"
+                  >
+                    <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                      <span className="font-semibold text-white">Editor Consolidated Payout Ledger:</span>
+                      <span className="text-[10px] text-gold-400 font-mono uppercase">{editorFinancialSummary.projectCount} Projects Assigned</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 text-center">
+                      <div className="p-2 bg-black/20 rounded-xl">
+                        <div className="text-[9px] text-gray-400 uppercase font-mono">Total Editor Budget</div>
+                        <div className="font-bold text-white mt-0.5">₹{editorFinancialSummary.totalBudget.toLocaleString('en-IN')}</div>
+                      </div>
+                      <div className="p-2 bg-black/20 rounded-xl">
+                        <div className="text-[9px] text-gray-400 uppercase font-mono">Paid To Date</div>
+                        <div className="font-bold text-emerald-400 mt-0.5">₹{editorFinancialSummary.totalPaid.toLocaleString('en-IN')}</div>
+                      </div>
+                      <div className="p-2 bg-black/20 rounded-xl">
+                        <div className="text-[9px] text-gray-400 uppercase font-mono">Net Pending Balance</div>
+                        <div className="font-bold text-amber-500 mt-0.5">₹{editorFinancialSummary.totalPending.toLocaleString('en-IN')}</div>
+                      </div>
+                    </div>
+
+                    {/* Calculated Outcome */}
+                    {paymentAmount > 0 && (
+                      <div className="mt-2 pt-2 border-t border-dashed border-white/10 flex justify-between items-center text-[11px] font-mono">
+                        <span className="text-gray-400">Projected Pending after this payout:</span>
+                        <span className="font-bold text-amber-400">
+                          ₹{Math.max(0, editorFinancialSummary.totalPending - paymentAmount).toLocaleString('en-IN')} Pending
+                        </span>
                       </div>
                     )}
                   </motion.div>
@@ -2637,12 +3229,12 @@ const DashboardView = React.memo(function DashboardView({
                       />
                     </div>
                     {/* Amount Preset Buttons */}
-                    {formSelectedProject && (
+                    {((paymentType === 'studio' && studioFinancialSummary) || (paymentType === 'editor' && editorFinancialSummary)) && (
                       <div className="flex gap-1.5 mt-2 flex-wrap">
                         {(() => {
                           const maxRemaining = paymentType === 'studio'
-                            ? (formSelectedProject.remainingBalance || 0)
-                            : (editorTargetPayment - editorAlreadyPaid);
+                            ? (studioFinancialSummary?.totalOutstanding || 0)
+                            : (editorFinancialSummary?.totalPending || 0);
                           
                           const presets = [5000, 10000, 25000, 50000].filter(p => p <= maxRemaining || maxRemaining === 0);
                           if (maxRemaining > 0 && !presets.includes(maxRemaining)) presets.push(maxRemaining);
