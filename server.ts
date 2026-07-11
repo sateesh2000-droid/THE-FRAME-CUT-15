@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, ThinkingLevel } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 // Load env variables
 import dotenv from "dotenv";
@@ -62,7 +62,7 @@ ${JSON.stringify(context || {}, null, 2)}`;
 
       if (useHighThinking) {
         config.thinkingConfig = {
-          thinkingLevel: ThinkingLevel.HIGH,
+          thinkingLevel: "HIGH",
         };
       }
 

@@ -51,7 +51,7 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
     { id: 'invoice', label: 'Invoice', icon: Receipt, roles: ['admin', 'studio'] },
     { id: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin'] },
     { id: 'calendar', label: 'Calendar', icon: Calendar, roles: ['admin', 'editor'] },
-    { id: 'notifications', label: 'Notifications', icon: Bell, roles: ['admin', 'editor'] },
+    { id: 'notifications', label: 'Notifications', icon: Bell, roles: ['admin', 'editor', 'studio'] },
     { id: 'settings', label: 'Settings', icon: Settings, roles: ['admin'] },
   ];
 
@@ -98,17 +98,15 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
 
         <div className="flex items-center space-x-3">
           {/* Quick Info/Notifications shortcut if notifications available */}
-          {role !== 'studio' && (
-            <button 
-              onClick={() => setActiveTab('notifications')}
-              className={`p-1.5 rounded-xl transition-all relative ${
-                activeTab === 'notifications' ? 'bg-gold-500/10 text-gold-400' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-gold-400 rounded-full animate-ping" />
-            </button>
-          )}
+          <button 
+            onClick={() => setActiveTab('notifications')}
+            className={`p-1.5 rounded-xl transition-all relative ${
+              activeTab === 'notifications' ? 'bg-gold-500/10 text-gold-400' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            <Bell className="w-4 h-4" />
+            <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-gold-400 rounded-full animate-ping" />
+          </button>
 
           {/* Minimal Avatar */}
           <div className="relative shrink-0 w-7 h-7 rounded-lg overflow-hidden border border-gold-500/20">

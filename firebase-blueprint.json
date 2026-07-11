@@ -12,12 +12,57 @@
         "status": { "type": "string" }
       },
       "required": ["id", "projectName"]
+    },
+    "invoices": {
+      "title": "Invoices",
+      "description": "Billing records generated for studio partners",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "coupleName": { "type": "string" },
+        "studioId": { "type": "string" },
+        "studioName": { "type": "string" },
+        "invoiceDate": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "subtotal": { "type": "number" },
+        "gstAmount": { "type": "number" },
+        "discount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "projectId", "studioId", "dueDate", "totalAmount"]
+    },
+    "notifications": {
+      "title": "Notifications",
+      "description": "Workflow alerts and overdue payment notifications",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string" },
+        "projectId": { "type": "string" },
+        "studioId": { "type": "string" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "title", "message", "type", "read"]
     }
   },
   "firestore": {
     "projects/{projectId}": {
       "schema": "projects",
       "description": "Wedding projects collection"
+    },
+    "invoices/{invoiceId}": {
+      "schema": "invoices",
+      "description": "Studio invoices collection"
+    },
+    "notifications/{notificationId}": {
+      "schema": "notifications",
+      "description": "System workflow alerts collection"
     }
   }
 }

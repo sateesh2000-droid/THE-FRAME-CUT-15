@@ -19,6 +19,7 @@ import SwipeableCard from './SwipeableCard';
 import { Project, Studio, Invoice } from '../types';
 import Logo from './Logo';
 import { jsPDF } from 'jspdf';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface InvoiceViewProps {
   projects: Project[];
@@ -41,6 +42,9 @@ export default function InvoiceView({
   const [discount, setDiscount] = useState<number>(0);
   const [includeGst, setIncludeGst] = useState<boolean>(true);
   const [invoiceId, setInvoiceId] = useState<string>('');
+  const [upiId, setUpiId] = useState<string>('');
+  const [paymentLink, setPaymentLink] = useState<string>('');
+  const [qrType, setQrType] = useState<'upi' | 'link'>('upi');
   
   // Custom Toast and confirmation state
   const [invoiceToDeleteId, setInvoiceToDeleteId] = useState<string | null>(null);
@@ -77,8 +81,15 @@ export default function InvoiceView({
       // Auto invoice ID with a clean, dynamic prefix from the studio's name
       const cleanPrefix = studio.name.trim().slice(0, 3).toUpperCase().replace(/[^A-Z]/g, 'ST');
       setInvoiceId(`INV-2026-${cleanPrefix}`);
+
+      // Sync payment info from studio profile
+      setUpiId(studio.upiId || '7772999933@icici');
+      setPaymentLink(studio.paymentLink || '');
+      setQrType(studio.upiId ? 'upi' : (studio.paymentLink ? 'link' : 'upi'));
     } else {
       setStudioProjects([]);
+      setUpiId('7772999933@icici');
+      setPaymentLink('');
     }
   }, [selectedStudioId, projects, studios]);
 
@@ -89,6 +100,19 @@ export default function InvoiceView({
   const gstAmount = includeGst ? Math.round((subtotal - discount) * gstRate) : 0;
   const totalAmount = subtotal - discount + gstAmount;
   const balanceDue = totalAmount - advance;
+
+  const getQrCodeData = () => {
+    if (qrType === 'upi' && upiId) {
+      const payeeName = upiId.trim() === '7772999933@icici' ? 'SATISH TIWARI' : 'THE FRAME CUT';
+      return `upi://pay?pa=${upiId.trim()}&pn=${encodeURIComponent(payeeName)}&am=${balanceDue}&cu=INR&tn=${encodeURIComponent('Invoice ' + invoiceId)}`;
+    }
+    if (qrType === 'link' && paymentLink) {
+      return paymentLink.trim();
+    }
+    return '';
+  };
+
+  const qrData = getQrCodeData();
 
   // Invoice generator handlers
   const handlePrint = () => {
@@ -161,6 +185,20 @@ export default function InvoiceView({
       pdfDoc.ellipse(x + 32 * scale, y + 57 * scale, 1.8 * scale, 1.8 * scale, 'F');
       
       pdfDoc.restoreGraphicsState();
+    };
+
+    // Helper to draw clean watermark on any PDF page
+    const drawWatermarkOnPDFPage = (pdfDoc: any) => {
+      drawLogoInPDF(pdfDoc, 55, 105, 100, '#FDFBFA');
+      pdfDoc.setFont('Helvetica', 'bold');
+      pdfDoc.setFontSize(11);
+      pdfDoc.setTextColor('#EFE8D9');
+      pdfDoc.text('THE FRAME CUT', 105, 185, { align: 'center' });
+      
+      pdfDoc.setFont('Helvetica', 'bold');
+      pdfDoc.setFontSize(8);
+      pdfDoc.setTextColor('#F5EDE0');
+      pdfDoc.text('CONFIDENTIAL STATEMENT', 105, 191, { align: 'center' });
     };
 
     // Brand Colors
@@ -250,13 +288,8 @@ export default function InvoiceView({
     doc.text('THE FRAME CUT', 150, 91, { align: 'center' });
 
     // BACKGROUND WATERMARK WITH 25% TRANSPARENCY
-    // Draw the beautiful vector logo watermark
-    drawLogoInPDF(doc, 55, 105, 100, '#FDFBFA');
-    
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor('#EFE8D9');
-    doc.text('THE FRAME CUT', 105, 185, { align: 'center' });
+    // Draw the beautiful vector logo watermark with confidential statement
+    drawWatermarkOnPDFPage(doc);
 
     // Divider line
     doc.setDrawColor(229, 231, 235);
@@ -275,13 +308,87 @@ export default function InvoiceView({
     doc.text('Advance Paid', 160, 109.5, { align: 'right' });
     doc.text('Outstanding Balance', 192, 109.5, { align: 'right' });
 
-    // Table Rows
-    let currentY = 118;
-    studioProjects.forEach((p) => {
-      if (currentY > 215) {
-        // Stop listing if out of page bounds for beautiful spacing
-        return;
+    // Helper to draw consistent footer with or without signature
+    const drawFooterOnPage = (pdfDoc: any, pageNum: number, isLastPage: boolean) => {
+      const sigY = 245;
+      pdfDoc.setDrawColor(209, 213, 219);
+      pdfDoc.setLineWidth(0.3);
+      pdfDoc.line(15, sigY, 195, sigY);
+
+      pdfDoc.setFont('Helvetica', 'normal');
+      pdfDoc.setFontSize(8);
+      pdfDoc.setTextColor('#9CA3AF');
+      pdfDoc.text('System Generated Consolidated Invoicing Statement', 15, sigY + 8);
+      pdfDoc.text(`The Frame Cut Studio OS © 2026 | Page ${pageNum}`, 15, sigY + 12);
+
+      if (isLastPage) {
+        // Signature right
+        pdfDoc.setFont('Helvetica', 'italic');
+        pdfDoc.setFontSize(11);
+        pdfDoc.setTextColor('#4B5563');
+        pdfDoc.text('Satish Tiwari', 165, sigY + 8, { align: 'center' });
+        
+        pdfDoc.setDrawColor(209, 213, 219);
+        pdfDoc.setLineWidth(0.3);
+        pdfDoc.line(145, sigY + 10, 185, sigY + 10);
+
+        pdfDoc.setFont('Helvetica', 'bold');
+        pdfDoc.setFontSize(7.5);
+        pdfDoc.setTextColor('#9CA3AF');
+        pdfDoc.text('AUTHORIZED MANAGER SIGNATURE', 165, sigY + 14, { align: 'center' });
       }
+    };
+
+    // Table Rows
+    let currentPageNum = 1;
+    let currentY = 118;
+
+    studioProjects.forEach((p) => {
+      const pageLimit = (currentPageNum === 1) ? 205 : 225;
+
+      if (currentY > pageLimit) {
+        // Draw non-last page footer
+        drawFooterOnPage(doc, currentPageNum, false);
+        
+        // Add a new page
+        doc.addPage();
+        currentPageNum++;
+
+        // Draw background watermark
+        drawWatermarkOnPDFPage(doc);
+
+        // Running Header
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(primaryColor);
+        doc.text('THE FRAME CUT', 15, 18);
+
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#C5A059');
+        doc.text(`CONSOLIDATED STATEMENT - ${invoiceId}`, 15, 22);
+
+        // Date on right
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor('#6B7280');
+        doc.text(`Date: ${new Date().toISOString().split('T')[0]}`, 195, 18, { align: 'right' });
+
+        // Simplified Table Header
+        doc.setFillColor('#F3F4F6');
+        doc.rect(15, 27, 180, 8, 'F');
+
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor('#4B5563');
+        doc.text('Wedding Project / Couple & Shoot Details (Continued)', 18, 32);
+        doc.text('Budget', 125, 32, { align: 'right' });
+        doc.text('Advance Paid', 160, 32, { align: 'right' });
+        doc.text('Outstanding Balance', 192, 32, { align: 'right' });
+
+        currentY = 41;
+      }
+
       doc.setFont('Helvetica', 'bold');
       doc.setFontSize(9);
       doc.setTextColor('#111827');
@@ -318,7 +425,57 @@ export default function InvoiceView({
     }
 
     // Determine bottom sections start point dynamically
-    let bottomY = Math.max(currentY + 6, 150);
+    let bottomY: number;
+    if (currentPageNum === 1) {
+      if (currentY > 190) {
+        // Draw current page footer
+        drawFooterOnPage(doc, currentPageNum, false);
+        doc.addPage();
+        currentPageNum++;
+
+        // Draw background watermark
+        drawWatermarkOnPDFPage(doc);
+
+        // Running Header
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(primaryColor);
+        doc.text('THE FRAME CUT', 15, 18);
+
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#C5A059');
+        doc.text(`CONSOLIDATED STATEMENT - ${invoiceId}`, 15, 22);
+
+        bottomY = 32;
+      } else {
+        bottomY = Math.max(currentY + 6, 150);
+      }
+    } else {
+      if (currentY > 190) {
+        drawFooterOnPage(doc, currentPageNum, false);
+        doc.addPage();
+        currentPageNum++;
+
+        // Draw background watermark
+        drawWatermarkOnPDFPage(doc);
+
+        // Running Header
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(primaryColor);
+        doc.text('THE FRAME CUT', 15, 18);
+
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#C5A059');
+        doc.text(`CONSOLIDATED STATEMENT - ${invoiceId}`, 15, 22);
+
+        bottomY = 32;
+      } else {
+        bottomY = currentY + 6;
+      }
+    }
 
     // Bottom Divider
     doc.setDrawColor(229, 231, 235);
@@ -335,7 +492,20 @@ export default function InvoiceView({
     doc.setFont('Helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor('#6B7280');
-    const termsText = 'Consolidated ledger statement of active post-production. Please clear remaining balance dues for final raw assets delivery.';
+    
+    let termsText = 'Consolidated ledger statement of active post-production. Please clear remaining balance dues for final raw assets delivery.';
+    
+    termsText += '\n\nBANK TRANSFER DETAILS:';
+    termsText += '\n- Bank Name: ICICI BANK';
+    termsText += '\n- Account Holder: SATISH TIWARI';
+    termsText += '\n- Account Number: 390701503993';
+    termsText += '\n- IFSC Code: ICIC0003907';
+    termsText += '\n- Account Type: Savings';
+    termsText += `\n- VPA (UPI ID): ${upiId ? upiId.trim() : '7772999933@icici'}`;
+    
+    if (paymentLink) {
+      termsText += `\n- Direct Gateway: ${paymentLink.trim()}`;
+    }
     const splitTerms = doc.splitTextToSize(termsText, 80);
     doc.text(splitTerms, 15, bottomY + 15);
 
@@ -385,31 +555,8 @@ export default function InvoiceView({
     doc.setFont('Helvetica', 'extrabold');
     doc.text(`INR ${balanceDue.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
 
-    // Signature Block
-    const sigY = 245;
-    doc.setDrawColor(209, 213, 219);
-    doc.line(15, sigY, 195, sigY);
-
-    doc.setFont('Helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor('#9CA3AF');
-    doc.text('System Generated Consolidated Invoicing Statement', 15, sigY + 8);
-    doc.text('The Frame Cut Studio OS © 2026', 15, sigY + 12);
-
-    // Signature right
-    doc.setFont('Helvetica', 'italic');
-    doc.setFontSize(11);
-    doc.setTextColor('#4B5563');
-    doc.text('Satish Tiwari', 165, sigY + 8, { align: 'center' });
-    
-    doc.setDrawColor(209, 213, 219);
-    doc.setLineWidth(0.3);
-    doc.line(145, sigY + 10, 185, sigY + 10);
-
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.setTextColor('#9CA3AF');
-    doc.text('AUTHORIZED MANAGER SIGNATURE', 165, sigY + 14, { align: 'center' });
+    // Draw final page footer with signature block
+    drawFooterOnPage(doc, currentPageNum, true);
 
     // Save/Download the PDF
     const filename = `${invoiceId}-${currentStudio.name.replace(/\s+/g, '_')}.pdf`;
@@ -516,7 +663,7 @@ export default function InvoiceView({
     <div className="space-y-6">
       
       {/* Top selection bar */}
-      <div className="p-6 rounded-3xl glass-panel relative print:hidden">
+      <div className="p-6 rounded-3xl glass-panel relative print:hidden space-y-5">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
           <div className="md:col-span-2">
             <label className="block text-[10px] font-mono text-gray-400 uppercase mb-1.5">Select Studio Partner</label>
@@ -557,26 +704,95 @@ export default function InvoiceView({
             </label>
           </div>
         </div>
+
+        {/* Dynamic Billing QR Configuration Row */}
+        <div className="border-t border-white/5 pt-4">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+            <div className="md:col-span-3 text-left">
+              <span className="text-[10px] font-mono text-gold-400 uppercase tracking-wider block font-bold">Dynamic Payment QR Code</span>
+              <span className="text-[9px] text-gray-400 leading-normal block mt-1">Configure UPI/Payment link on-the-fly to embed in client invoice.</span>
+            </div>
+
+            <div className="md:col-span-3">
+              <label className="block text-[9px] font-mono text-gray-400 uppercase mb-1">Active QR Mode</label>
+              <div className="flex space-x-1.5 p-1 bg-black/40 rounded-xl border border-white/5">
+                <button
+                  type="button"
+                  onClick={() => setQrType('upi')}
+                  className={`flex-1 text-[9px] font-mono py-1 rounded-lg text-center font-bold transition-all cursor-pointer ${
+                    qrType === 'upi' ? 'bg-[#d4af37]/15 text-gold-400 border border-gold-500/20' : 'text-gray-400 hover:text-white border border-transparent'
+                  }`}
+                >
+                  UPI Pay
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQrType('link')}
+                  className={`flex-1 text-[9px] font-mono py-1 rounded-lg text-center font-bold transition-all cursor-pointer ${
+                    qrType === 'link' ? 'bg-[#d4af37]/15 text-gold-400 border border-gold-500/20' : 'text-gray-400 hover:text-white border border-transparent'
+                  }`}
+                >
+                  Direct Link
+                </button>
+              </div>
+            </div>
+
+            <div className="md:col-span-3">
+              <label className="block text-[9px] font-mono text-gray-400 uppercase mb-1">
+                {qrType === 'upi' ? 'UPI ID (Amount Pre-filled)' : 'Web Gateway URL'}
+              </label>
+              <input
+                type="text"
+                value={qrType === 'upi' ? upiId : paymentLink}
+                onChange={(e) => {
+                  if (qrType === 'upi') {
+                    setUpiId(e.target.value);
+                  } else {
+                    setPaymentLink(e.target.value);
+                  }
+                }}
+                placeholder={qrType === 'upi' ? 'e.g. sateeshtiwari@okaxis' : 'e.g. https://razorpay.me/@studio'}
+                className="w-full bg-charcoal-900 border border-luxury-green-800/20 rounded-xl px-3 py-1.5 text-[10px] text-white focus:outline-none placeholder-gray-600 font-mono"
+              />
+            </div>
+
+            <div className="md:col-span-3 flex items-center space-x-2">
+              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <span className="text-[10px] text-gray-300 font-mono leading-relaxed">
+                {qrData ? 'QR Embedded Successfully' : 'No Payment Configured'}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Invoice Receipt Layout */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         
         {/* Printable Invoice Page */}
-        <div className="xl:col-span-2 p-10 rounded-[32px] bg-gradient-to-b from-[#FCFBF7] to-[#FAF6EE] text-charcoal-950 shadow-[0_24px_70px_-12px_rgba(197,160,89,0.12)] relative border border-gold-500/20 max-w-3xl mx-auto w-full min-h-[820px] flex flex-col justify-between overflow-hidden print:border-0 print:shadow-none print:p-0">
+        <div className="xl:col-span-2 p-10 rounded-[32px] bg-gradient-to-b from-[#FCFBF7] to-[#FAF6EE] text-charcoal-950 shadow-[0_24px_70px_-12px_rgba(197,160,89,0.12)] relative border border-gold-500/20 max-w-3xl mx-auto w-full min-h-[820px] flex flex-col justify-between overflow-hidden print:overflow-visible print:h-auto print:min-h-0 print:border-0 print:shadow-none print:p-0 printable-invoice-container">
           
           {/* Delicate Inset Gold Double Frame for Luxury Aesthetic */}
           <div className="absolute inset-4 rounded-[24px] border border-gold-500/10 pointer-events-none select-none z-0 print:hidden" />
           
           {/* Watermark Background Logo (6% Transparency) */}
-          <div className="absolute inset-0 flex items-center justify-center opacity-[0.06] pointer-events-none select-none z-0 print:opacity-[0.05]">
+          <div className="absolute inset-0 flex items-center justify-center opacity-[0.06] pointer-events-none select-none z-0 print:hidden">
             <Logo size={360} variant="gold" className="transform -rotate-12 scale-110" />
           </div>
 
-          <div className="relative z-10 flex flex-col justify-between h-full flex-1 px-4 py-2">
+          {/* Repeating Watermark across printed pages (position: fixed is respected by browsers in print) */}
+          <div className="hidden print:flex fixed inset-0 items-center justify-center pointer-events-none z-0 select-none overflow-hidden print-watermark-wrapper" style={{ position: 'fixed', zIndex: 0 }}>
+            <div className="text-center transform -rotate-[35deg] scale-110 opacity-[0.04]">
+              <Logo size={420} variant="gold" className="mx-auto mb-2" />
+              <div className="font-display font-black tracking-[0.25em] text-gold-600 text-5xl leading-none">THE FRAME CUT</div>
+              <div className="font-mono tracking-[0.4em] text-gold-500 text-xs mt-3 uppercase font-semibold">CONFIDENTIAL STATEMENT</div>
+            </div>
+          </div>
+
+          <div className="relative z-10 flex flex-col justify-between h-full flex-1 px-4 py-2 print:block print:h-auto print:min-h-0">
             <div>
               {/* Invoice Top Brand Header */}
-              <div className="flex justify-between items-start border-b border-gold-500/10 pb-6">
+              <div className="flex justify-between items-start border-b border-gold-500/10 pb-6 invoice-header break-inside-avoid page-break-inside-avoid">
                 <div>
                   <div className="flex items-center space-x-3">
                     <Logo size={36} variant="gold" className="shrink-0" />
@@ -608,7 +824,7 @@ export default function InvoiceView({
               </div>
 
               {/* Client and Partner specs */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-6 border-b border-gold-500/10 text-xs">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-6 border-b border-gold-500/10 text-xs invoice-client-info break-inside-avoid page-break-inside-avoid">
                 <div className="space-y-2">
                   <h3 className="font-mono text-gold-600 uppercase tracking-[0.2em] text-[9px] font-semibold">BILLED TO PARTNER</h3>
                   <div className="space-y-1">
@@ -639,7 +855,7 @@ export default function InvoiceView({
               </div>
 
               {/* Line Items Table */}
-              <div className="overflow-x-auto my-8">
+              <div className="overflow-x-auto my-8 print:overflow-visible">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="border-b border-gold-500/15 text-[9px] font-mono text-stone-400 uppercase tracking-wider">
@@ -652,7 +868,7 @@ export default function InvoiceView({
                   <tbody className="divide-y divide-gold-500/5 font-sans text-stone-700">
                     {studioProjects.length > 0 ? (
                       studioProjects.map((p) => (
-                        <tr key={p.id} className="hover:bg-gold-500/[0.01] transition-colors">
+                        <tr key={p.id} className="hover:bg-gold-500/[0.01] transition-colors break-inside-avoid page-break-inside-avoid">
                           <td className="py-4 pl-2">
                             <span className="font-bold text-stone-900 text-sm block tracking-wide">{p.coupleName}</span>
                             <span className="block text-[10px] text-stone-400 mt-1 font-medium">{p.eventType} • Shoot: {p.shootDate}</span>
@@ -675,14 +891,66 @@ export default function InvoiceView({
             </div>
 
             {/* Subtotal summary calculations block */}
-            <div className="border-t border-gold-500/10 pt-6">
+            <div className="border-t border-gold-500/10 pt-6 invoice-summary break-inside-avoid page-break-inside-avoid">
               <div className="flex flex-col md:flex-row justify-between items-start gap-6">
-                <div className="text-[10px] font-mono text-stone-400 leading-relaxed max-w-xs space-y-1">
-                  <p className="font-bold text-stone-700 tracking-wider uppercase mb-1 flex items-center space-x-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-gold-500" />
-                    <span>TERMS & SETTLEMENTS</span>
-                  </p>
-                  <p>Consolidated ledger statement of active post-production. Please clear remaining balance dues for final raw assets delivery.</p>
+                <div className="flex-1 space-y-4 w-full">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
+                    <div className="text-[10px] font-mono text-stone-400 leading-relaxed space-y-1">
+                      <p className="font-bold text-stone-700 tracking-wider uppercase mb-1 flex items-center space-x-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-gold-500" />
+                        <span>TERMS & SETTLEMENTS</span>
+                      </p>
+                      <p>Consolidated ledger statement of active post-production. Please clear remaining balance dues for final raw assets delivery.</p>
+                    </div>
+
+                    <div className="text-[9px] sm:text-[9.5px] font-mono text-stone-500 leading-relaxed space-y-0.5 bg-gold-500/[0.03] border border-gold-500/10 p-3 rounded-xl break-inside-avoid">
+                      <p className="font-bold text-stone-700 tracking-wider uppercase mb-1 flex items-center space-x-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        <span>BANK TRANSFER DETAILS</span>
+                      </p>
+                      <p><span className="text-stone-400 font-medium">Bank Name:</span> <span className="font-bold text-stone-800">ICICI BANK</span></p>
+                      <p><span className="text-stone-400 font-medium">Account Name:</span> <span className="font-bold text-stone-800">SATISH TIWARI</span></p>
+                      <p><span className="text-stone-400 font-medium">Account Number:</span> <span className="font-bold text-stone-800">390701503993</span></p>
+                      <p><span className="text-stone-400 font-medium">IFSC Code:</span> <span className="font-bold text-stone-800">ICIC0003907</span></p>
+                      <p><span className="text-stone-400 font-medium">Account Type:</span> <span className="font-bold text-stone-800">Savings</span></p>
+                      <p><span className="text-stone-400 font-medium">VPA (UPI ID):</span> <span className="font-bold text-[#C5A059]">{upiId || '7772999933@icici'}</span></p>
+                    </div>
+                  </div>
+
+                  {/* Dynamic QR Code Section */}
+                  {qrData ? (
+                    <div className="flex items-center space-x-4 bg-[#FAF7F0] border border-gold-500/15 p-3.5 rounded-2xl max-w-sm">
+                      <div className="p-1.5 bg-white border border-gold-500/20 rounded-xl shadow-inner shrink-0">
+                        <QRCodeSVG 
+                          value={qrData}
+                          size={80}
+                          bgColor="#FFFFFF"
+                          fgColor="#1C1917"
+                          level="M"
+                          includeMargin={false}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-mono text-gold-600 font-bold uppercase tracking-wider text-[8px]">
+                          {qrType === 'upi' ? 'UPI INSTANT SETTLEMENT' : 'DIRECT PAYMENT LINK'}
+                        </p>
+                        <p className="font-display font-black text-stone-900 text-xs tracking-tight">
+                          {qrType === 'upi' ? 'Scan to Pay Balance' : 'Scan to Open Link'}
+                        </p>
+                        <p className="font-mono text-[8px] text-stone-500 break-all leading-normal max-w-[190px]">
+                          {qrType === 'upi' ? `ID: ${upiId}` : paymentLink}
+                        </p>
+                        <p className="font-sans font-semibold text-[8px] text-emerald-600">
+                          {qrType === 'upi' ? `Pre-filled: ₹${balanceDue.toLocaleString('en-IN')}` : 'Online Card/UPI Accepted'}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3.5 bg-stone-100/60 border border-stone-200/50 rounded-2xl max-w-sm text-[9px] font-mono text-stone-400 leading-normal">
+                      <span className="text-stone-500 font-bold uppercase block mb-1">PAYMENT RAIL PREVIEW</span>
+                      No payment gateway or UPI configured. Set your UPI ID or Payment Link in the options bar above to render a live payment QR code instantly.
+                    </div>
+                  )}
                 </div>
 
                 <div className="w-full md:w-72 bg-[#F6F3EB]/60 border border-gold-500/15 p-5 rounded-2xl space-y-2.5 text-xs text-stone-600 font-mono shadow-sm">
@@ -715,7 +983,7 @@ export default function InvoiceView({
             </div>
 
             {/* Signature Block */}
-            <div className="flex justify-between items-end border-t border-gold-500/10 pt-8 mt-8">
+            <div className="flex justify-between items-end border-t border-gold-500/10 pt-8 mt-8 invoice-signature break-inside-avoid page-break-inside-avoid">
               <div className="text-[9px] font-mono text-stone-400 space-y-0.5">
                 <p className="font-medium">System Generated Invoicing Statement</p>
                 <p>© 2026 The Frame Cut Studio OS</p>
@@ -745,6 +1013,23 @@ export default function InvoiceView({
               >
                 <span>Print / Save PDF File</span>
                 <Printer className="w-4 h-4 text-gold-300" />
+              </button>
+
+              <button
+                id="btn-download-pdf"
+                onClick={() => {
+                  try {
+                    const filename = handleExportPDF();
+                    triggerToast("PDF Downloaded", `Consolidated statement ${filename} has been saved.`);
+                  } catch (err) {
+                    console.error('PDF generation failed:', err);
+                    triggerToast("PDF Error", "Failed to compile multi-page PDF document.");
+                  }
+                }}
+                className="w-full flex items-center justify-between p-3.5 bg-charcoal-800 hover:bg-charcoal-700 text-gray-200 text-xs font-medium rounded-2xl cursor-pointer"
+              >
+                <span>Download Invoice PDF</span>
+                <FileText className="w-4 h-4 text-amber-400" />
               </button>
 
               <button

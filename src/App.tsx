@@ -56,7 +56,14 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('tfc_theme', theme);
+    document.body.classList.add('theme-transition');
     document.body.setAttribute('data-theme', theme);
+
+    const timer = setTimeout(() => {
+      document.body.classList.remove('theme-transition');
+    }, 1000);
+
+    return () => clearTimeout(timer);
   }, [theme]);
 
   // Firestore Collections States
@@ -203,6 +210,98 @@ export default function App() {
       unsubPayments();
     };
   }, []);
+
+  // 5. Automated Invoice Due Date Notifications check
+  useEffect(() => {
+    if (invoices.length === 0) return;
+
+    const checkInvoiceDueDates = async () => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      for (const invoice of invoices) {
+        if (invoice.status === 'paid') {
+          // If the invoice is paid, clean up any pending notifications for it
+          const approachingId = `notif-approaching-${invoice.id}`;
+          const overdueId = `notif-overdue-${invoice.id}`;
+          const hasApproaching = notifications.some(n => n.id === approachingId);
+          const hasOverdue = notifications.some(n => n.id === overdueId);
+          
+          if (hasApproaching || hasOverdue) {
+            try {
+              if (hasApproaching) {
+                await deleteDoc(doc(db, 'notifications', approachingId));
+              }
+              if (hasOverdue) {
+                await deleteDoc(doc(db, 'notifications', overdueId));
+              }
+            } catch (e) {
+              console.error('Error clearing paid invoice notifications:', e);
+            }
+          }
+          continue;
+        }
+
+        const due = new Date(invoice.dueDate);
+        due.setHours(0, 0, 0, 0);
+
+        // Calculate difference in days
+        const diffTime = due.getTime() - today.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        const studioId = invoice.studioId;
+
+        if (diffDays < 0) {
+          // Overdue invoice!
+          const overdueId = `notif-overdue-${invoice.id}`;
+          const existingNotif = notifications.find(n => n.id === overdueId);
+          if (!existingNotif) {
+            try {
+              await setDoc(doc(db, 'notifications', overdueId), {
+                id: overdueId,
+                title: `Invoice Overdue: ${invoice.id}`,
+                message: `Invoice ${invoice.id} for "${invoice.coupleName}" was due on ${invoice.dueDate} (overdue by ${Math.abs(diffDays)} day${Math.abs(diffDays) === 1 ? '' : 's'}). Outstanding balance: INR ${invoice.balanceDue.toLocaleString('en-IN')}.`,
+                type: 'payment_pending',
+                projectId: invoice.projectId,
+                studioId: studioId,
+                read: false,
+                createdAt: new Date()
+              });
+
+              // Also auto-update status to overdue if not already
+              if (invoice.status !== 'overdue') {
+                await updateDoc(doc(db, 'invoices', invoice.id), { status: 'overdue' });
+              }
+            } catch (e) {
+              console.error('Error creating overdue invoice notification:', e);
+            }
+          }
+        } else if (diffDays <= 3 && diffDays >= 0) {
+          // Approaching invoice (due within 3 days)
+          const approachingId = `notif-approaching-${invoice.id}`;
+          const existingNotif = notifications.find(n => n.id === approachingId);
+          if (!existingNotif) {
+            try {
+              await setDoc(doc(db, 'notifications', approachingId), {
+                id: approachingId,
+                title: `Invoice Due Approaching: ${invoice.id}`,
+                message: `Invoice ${invoice.id} for "${invoice.coupleName}" is due in ${diffDays} day${diffDays === 1 ? '' : 's'} (${invoice.dueDate}). Balance: INR ${invoice.balanceDue.toLocaleString('en-IN')}.`,
+                type: 'invoice_pending',
+                projectId: invoice.projectId,
+                studioId: studioId,
+                read: false,
+                createdAt: new Date()
+              });
+            } catch (e) {
+              console.error('Error creating approaching invoice notification:', e);
+            }
+          }
+        }
+      }
+    };
+
+    checkInvoiceDueDates();
+  }, [invoices, notifications]);
 
   // Helper to recursively remove undefined properties from objects to prevent Firestore setDoc/updateDoc failures.
   const cleanUndefined = (obj: any): any => {
@@ -452,6 +551,31 @@ export default function App() {
 
   const roleFilteredProjects = getRoleFilteredProjects();
 
+  const getRoleFilteredNotifications = () => {
+    if (currentUser?.role === 'studio' && currentUser.studioId) {
+      return notifications.filter(n => {
+        if (n.studioId) return n.studioId === currentUser.studioId;
+        if (n.projectId) {
+          const proj = projects.find(p => p.id === n.projectId);
+          return proj?.studioId === currentUser.studioId;
+        }
+        return false;
+      });
+    }
+    if (currentUser?.role === 'editor' && currentUser.editorId) {
+      return notifications.filter(n => {
+        if (n.projectId) {
+          const proj = projects.find(p => p.id === n.projectId);
+          return proj?.assignedEditorId === currentUser.editorId || proj?.secondEditorId === currentUser.editorId;
+        }
+        return true;
+      });
+    }
+    return notifications;
+  };
+
+  const roleFilteredNotifications = getRoleFilteredNotifications();
+
   // Render correct tab view panel
   const renderView = () => {
     switch (activeTab) {
@@ -462,7 +586,7 @@ export default function App() {
             studios={studios}
             editors={editors}
             expenses={expenses}
-            notifications={notifications}
+            notifications={roleFilteredNotifications}
             calendarEvents={calendarEvents}
             onQuickAction={handleQuickAction}
             isOnline={isOnline}
@@ -595,7 +719,7 @@ export default function App() {
       case 'notifications':
         return (
           <NotificationsView
-            notifications={notifications}
+            notifications={roleFilteredNotifications}
             onMarkRead={handleMarkRead}
             onClearNotification={handleClearNotification}
           />

@@ -67,6 +67,8 @@ const StudiosView = React.memo(function StudiosView({
   const [gstNumber, setGstNumber] = useState('');
   const [notes, setNotes] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
+  const [upiId, setUpiId] = useState('');
+  const [paymentLink, setPaymentLink] = useState('');
 
   const openCreateModal = () => {
     setEditingStudio(null);
@@ -78,6 +80,8 @@ const StudiosView = React.memo(function StudiosView({
     setGstNumber('');
     setNotes('');
     setLogoUrl('');
+    setUpiId('');
+    setPaymentLink('');
     setIsModalOpen(true);
   };
 
@@ -92,6 +96,8 @@ const StudiosView = React.memo(function StudiosView({
     setGstNumber(studio.gstNumber || '');
     setNotes(studio.notes || '');
     setLogoUrl(studio.logoUrl || '');
+    setUpiId(studio.upiId || '');
+    setPaymentLink(studio.paymentLink || '');
     setIsModalOpen(true);
   };
 
@@ -107,7 +113,9 @@ const StudiosView = React.memo(function StudiosView({
           address,
           gstNumber,
           notes,
-          logoUrl
+          logoUrl,
+          upiId,
+          paymentLink
         });
         if (selectedStudio?.id === editingStudio.id) {
           setSelectedStudio({
@@ -119,7 +127,9 @@ const StudiosView = React.memo(function StudiosView({
             address,
             gstNumber,
             notes,
-            logoUrl
+            logoUrl,
+            upiId,
+            paymentLink
           });
         }
       } else {
@@ -133,7 +143,9 @@ const StudiosView = React.memo(function StudiosView({
           address,
           gstNumber,
           notes,
-          logoUrl
+          logoUrl,
+          upiId,
+          paymentLink
         });
       }
       setIsModalOpen(false);
@@ -577,6 +589,29 @@ const StudiosView = React.memo(function StudiosView({
                           className="w-full bg-charcoal-900 border border-luxury-green-800/20 rounded-xl px-3 py-1.5 text-[10px] text-white focus:outline-none placeholder-gray-600 font-mono"
                         />
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-mono text-gold-400 uppercase mb-1">UPI ID for Payments</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. sateeshtiwari@okaxis"
+                        value={upiId}
+                        onChange={(e) => setUpiId(e.target.value)}
+                        className="w-full bg-charcoal-900 border border-luxury-green-800/30 rounded-xl px-3 py-2 text-xs text-white focus:outline-none placeholder-gray-600"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-mono text-gold-400 uppercase mb-1">Direct Payment Link</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. https://razorpay.me/@studio"
+                        value={paymentLink}
+                        onChange={(e) => setPaymentLink(e.target.value)}
+                        className="w-full bg-charcoal-900 border border-luxury-green-800/30 rounded-xl px-3 py-2 text-xs text-white focus:outline-none placeholder-gray-600"
+                      />
                     </div>
                   </div>
 

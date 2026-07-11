@@ -21,6 +21,8 @@ export interface Studio {
   gstNumber?: string;
   notes?: string;
   logoUrl?: string;
+  upiId?: string;
+  paymentLink?: string;
   createdAt: any;
 }
 
@@ -156,6 +158,7 @@ export interface AppNotification {
   message: string;
   type: 'delivery_tomorrow' | 'payment_pending' | 'invoice_pending' | 'project_completed' | 'new_assignment' | 'revision_request';
   projectId?: string;
+  studioId?: string;
   read: boolean;
   createdAt: any;
 }

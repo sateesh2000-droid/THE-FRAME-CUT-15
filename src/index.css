@@ -159,3 +159,116 @@ body[data-theme="midnight-gold"] .organic-bg-green {
 body[data-theme="midnight-gold"] .organic-green-leaf-gradient {
   background: linear-gradient(135deg, #423624 0%, #16130e 100%);
 }
+
+/* Smooth theme cross-fade transition definition */
+.theme-transition,
+.theme-transition * {
+  transition: background-color 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+              color 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+              fill 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+              stroke 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.8s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Luxury Multi-page Invoice Print Styles */
+@media print {
+  /* Suppress layout headers, sidebars, buttons and modals */
+  .print\:hidden,
+  aside,
+  nav,
+  button,
+  header,
+  footer,
+  .glass-panel,
+  [id^="btn-"],
+  div[class*="Sidebar"],
+  div[class*="sidebar"] {
+    display: none !important;
+  }
+
+  /* Reset outer container page constraints to allow vertical pagination flow */
+  html, body {
+    background: #FCFBF7 !important;
+    background-color: #FCFBF7 !important;
+    color: #1c1917 !important;
+    font-size: 11pt !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  #root {
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Remove any absolute/fixed flex containers or layout limits */
+  div.flex, main, #main-content-flow {
+    display: block !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  .grid {
+    display: block !important;
+    gap: 0 !important;
+  }
+
+  /* Force the sidebar spacer to hide on print */
+  .hidden.md\:block.w-24.shrink-0 {
+    display: none !important;
+  }
+
+  /* Style the invoice document container as a clean full-width print page */
+  .printable-invoice-container {
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 10mm !important; /* Professional margin inside A4 size */
+    margin: 0 auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #FCFBF7 !important;
+    background-color: #FCFBF7 !important;
+    display: block !important;
+  }
+
+  /* Prevent awkward page break splits inside logical document blocks */
+  .invoice-header,
+  .invoice-client-info,
+  .invoice-summary,
+  .invoice-signature,
+  .break-inside-avoid,
+  .page-break-inside-avoid {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Table-specific pagination flow rules */
+  table {
+    width: 100% !important;
+    page-break-inside: auto !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+}
+
