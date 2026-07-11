@@ -42,11 +42,26 @@ import SettingsView from './components/SettingsView';
 import LoginView from './components/LoginView';
 import GeminiAIView from './components/GeminiAIView';
 
+// Helper to convert any Firebase/JS timestamp or date safely to milliseconds
+const getTimestampMs = (val: any): number => {
+  if (!val) return 0;
+  if (typeof val.toMillis === 'function') return val.toMillis();
+  if (val.seconds !== undefined) return val.seconds * 1000 + (val.nanoseconds || 0) / 1000000;
+  if (val instanceof Date) return val.getTime();
+  if (typeof val === 'string' || typeof val === 'number') {
+    const parsed = new Date(val).getTime();
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [subActionTrigger, setSubActionTrigger] = useState<string>('');
+
+  const lastCheckedSignatureRef = React.useRef<string>('');
 
   // Color Palette/Theme preference with local storage persistence
   const [theme, setTheme] = useState<'luxury-green' | 'midnight-gold'>(() => {
@@ -126,87 +141,163 @@ export default function App() {
 
   // 4. Real-time Firestore Subscriptions
   useEffect(() => {
-    // Projects Sync
-    const unsubProjects = onSnapshot(collection(db, 'projects'), (snap) => {
-      const list: Project[] = [];
-      snap.forEach(docSnap => {
-        list.push({ ...docSnap.data() as any, id: docSnap.id });
-      });
-      // Sort newest created first
-      setProjects(list.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
-    });
+    let unsubProjects = () => {};
+    let unsubStudios = () => {};
+    let unsubEditors = () => {};
+    let unsubExpenses = () => {};
+    let unsubInvoices = () => {};
+    let unsubNotifs = () => {};
+    let unsubCalendar = () => {};
+    let unsubRevs = () => {};
+    let unsubPayments = () => {};
 
-    // Studios Sync
-    const unsubStudios = onSnapshot(collection(db, 'studios'), (snap) => {
-      const list: Studio[] = [];
-      snap.forEach(docSnap => {
-        list.push({ ...docSnap.data() as any, id: docSnap.id });
-      });
-      setStudios(list);
-    });
+    try {
+      // Projects Sync
+      unsubProjects = onSnapshot(
+        collection(db, 'projects'),
+        (snap) => {
+          const list: Project[] = [];
+          snap.forEach(docSnap => {
+            list.push({ ...docSnap.data() as any, id: docSnap.id });
+          });
+          // Sort newest created first
+          setProjects(list.sort((a, b) => getTimestampMs(b.createdAt) - getTimestampMs(a.createdAt)));
+        },
+        (error) => {
+          console.error("Error syncing projects from Firestore:", error);
+        }
+      );
 
-    // Editors Sync
-    const unsubEditors = onSnapshot(collection(db, 'editors'), (snap) => {
-      const list: Editor[] = [];
-      snap.forEach(docSnap => {
-        list.push({ ...docSnap.data() as any, id: docSnap.id });
-      });
-      setEditors(list);
-    });
+      // Studios Sync
+      unsubStudios = onSnapshot(
+        collection(db, 'studios'),
+        (snap) => {
+          const list: Studio[] = [];
+          snap.forEach(docSnap => {
+            list.push({ ...docSnap.data() as any, id: docSnap.id });
+          });
+          setStudios(list);
+        },
+        (error) => {
+          console.error("Error syncing studios from Firestore:", error);
+        }
+      );
 
-    // Expenses Sync
-    const unsubExpenses = onSnapshot(collection(db, 'expenses'), (snap) => {
-      const list: Expense[] = [];
-      snap.forEach(docSnap => {
-        list.push({ ...docSnap.data() as any, id: docSnap.id });
-      });
-      setExpenses(list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-    });
+      // Editors Sync
+      unsubEditors = onSnapshot(
+        collection(db, 'editors'),
+        (snap) => {
+          const list: Editor[] = [];
+          snap.forEach(docSnap => {
+            list.push({ ...docSnap.data() as any, id: docSnap.id });
+          });
+          setEditors(list);
+        },
+        (error) => {
+          console.error("Error syncing editors from Firestore:", error);
+        }
+      );
 
-    // Invoices Sync
-    const unsubInvoices = onSnapshot(collection(db, 'invoices'), (snap) => {
-      const list: Invoice[] = [];
-      snap.forEach(docSnap => {
-        list.push({ ...docSnap.data() as any, id: docSnap.id });
-      });
-      setInvoices(list);
-    });
+      // Expenses Sync
+      unsubExpenses = onSnapshot(
+        collection(db, 'expenses'),
+        (snap) => {
+          const list: Expense[] = [];
+          snap.forEach(docSnap => {
+            list.push({ ...docSnap.data() as any, id: docSnap.id });
+          });
+          setExpenses(list.sort((a, b) => {
+            const timeA = a.date ? new Date(a.date).getTime() : 0;
+            const timeB = b.date ? new Date(b.date).getTime() : 0;
+            return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+          }));
+        },
+        (error) => {
+          console.error("Error syncing expenses from Firestore:", error);
+        }
+      );
 
-    // Notifications Sync
-    const unsubNotifs = onSnapshot(collection(db, 'notifications'), (snap) => {
-      const list: AppNotification[] = [];
-      snap.forEach(docSnap => {
-        list.push({ ...docSnap.data() as any, id: docSnap.id });
-      });
-      setNotifications(list.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
-    });
+      // Invoices Sync
+      unsubInvoices = onSnapshot(
+        collection(db, 'invoices'),
+        (snap) => {
+          const list: Invoice[] = [];
+          snap.forEach(docSnap => {
+            list.push({ ...docSnap.data() as any, id: docSnap.id });
+          });
+          setInvoices(list);
+        },
+        (error) => {
+          console.error("Error syncing invoices from Firestore:", error);
+        }
+      );
 
-    // Calendar Sync
-    const unsubCalendar = onSnapshot(collection(db, 'calendar'), (snap) => {
-      const list: CalendarEvent[] = [];
-      snap.forEach(docSnap => {
-        list.push({ ...docSnap.data() as any, id: docSnap.id });
-      });
-      setCalendarEvents(list);
-    });
+      // Notifications Sync
+      unsubNotifs = onSnapshot(
+        collection(db, 'notifications'),
+        (snap) => {
+          const list: AppNotification[] = [];
+          snap.forEach(docSnap => {
+            list.push({ ...docSnap.data() as any, id: docSnap.id });
+          });
+          setNotifications(list.sort((a, b) => getTimestampMs(b.createdAt) - getTimestampMs(a.createdAt)));
+        },
+        (error) => {
+          console.error("Error syncing notifications from Firestore:", error);
+        }
+      );
 
-    // Revisions Sync
-    const unsubRevs = onSnapshot(collection(db, 'revisionHistory'), (snap) => {
-      const list: Revision[] = [];
-      snap.forEach(docSnap => {
-        list.push({ ...docSnap.data() as any, id: docSnap.id });
-      });
-      setRevisions(list.sort((a, b) => b.revisionNumber - a.revisionNumber));
-    });
+      // Calendar Sync
+      unsubCalendar = onSnapshot(
+        collection(db, 'calendar'),
+        (snap) => {
+          const list: CalendarEvent[] = [];
+          snap.forEach(docSnap => {
+            list.push({ ...docSnap.data() as any, id: docSnap.id });
+          });
+          setCalendarEvents(list);
+        },
+        (error) => {
+          console.error("Error syncing calendar events from Firestore:", error);
+        }
+      );
 
-    // Payments Sync
-    const unsubPayments = onSnapshot(collection(db, 'editorPayments'), (snap) => {
-      const list: PaymentHistory[] = [];
-      snap.forEach(docSnap => {
-        list.push({ ...docSnap.data() as any, id: docSnap.id });
-      });
-      setPayments(list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-    });
+      // Revisions Sync
+      unsubRevs = onSnapshot(
+        collection(db, 'revisionHistory'),
+        (snap) => {
+          const list: Revision[] = [];
+          snap.forEach(docSnap => {
+            list.push({ ...docSnap.data() as any, id: docSnap.id });
+          });
+          setRevisions(list.sort((a, b) => (b.revisionNumber || 0) - (a.revisionNumber || 0)));
+        },
+        (error) => {
+          console.error("Error syncing revision history from Firestore:", error);
+        }
+      );
+
+      // Payments Sync
+      unsubPayments = onSnapshot(
+        collection(db, 'editorPayments'),
+        (snap) => {
+          const list: PaymentHistory[] = [];
+          snap.forEach(docSnap => {
+            list.push({ ...docSnap.data() as any, id: docSnap.id });
+          });
+          setPayments(list.sort((a, b) => {
+            const timeA = a.date ? new Date(a.date).getTime() : 0;
+            const timeB = b.date ? new Date(b.date).getTime() : 0;
+            return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+          }));
+        },
+        (error) => {
+          console.error("Error syncing payments from Firestore:", error);
+        }
+      );
+    } catch (e) {
+      console.error("Critical error setting up real-time subscriptions:", e);
+    }
 
     return () => {
       unsubProjects();
@@ -224,6 +315,13 @@ export default function App() {
   // 5. Automated Invoice Due Date Notifications check
   useEffect(() => {
     if (invoices.length === 0) return;
+
+    // Build unique signature of current invoices state to prevent duplicate checks and infinite loops
+    const signature = invoices.map(i => `${i.id}:${i.status}:${i.dueDate}:${i.balanceDue}`).join(',');
+    if (lastCheckedSignatureRef.current === signature) {
+      return;
+    }
+    lastCheckedSignatureRef.current = signature;
 
     const checkInvoiceDueDates = async () => {
       const today = new Date();
@@ -253,6 +351,7 @@ export default function App() {
         }
 
         const due = new Date(invoice.dueDate);
+        if (isNaN(due.getTime())) continue; // Safe date parsing guard
         due.setHours(0, 0, 0, 0);
 
         // Calculate difference in days

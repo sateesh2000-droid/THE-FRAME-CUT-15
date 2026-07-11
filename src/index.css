@@ -297,3 +297,13 @@ body[data-theme="midnight-gold"] .organic-green-leaf-gradient {
   }
 }
 
+/* Suppress development-only overlays like Vite error screen for smoother iframe preview */
+vite-error-overlay,
+#vite-error-overlay-backdrop,
+[id^="vite-error-overlay"] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+

@@ -5,33 +5,33 @@ import './index.css';
 
 // Silence benign Vite/WebSocket HMR errors to prevent distracting UI overlays
 if (typeof window !== 'undefined') {
-  window.addEventListener('unhandledrejection', (event) => {
-    const msg = event.reason?.message || String(event.reason || '');
-    if (
+  const isBenignError = (msg: string) => {
+    return (
       msg.includes('WebSocket') || 
       msg.includes('websocket') || 
       msg.includes('vite') || 
       msg.includes('HMR') || 
       msg.includes('closed without opened')
-    ) {
+    );
+  };
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const msg = event.reason?.message || String(event.reason || '');
+    if (isBenignError(msg)) {
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
     }
-  });
+  }, { capture: true });
 
   window.addEventListener('error', (event) => {
     const msg = event.message || '';
-    if (
-      msg.includes('WebSocket') || 
-      msg.includes('websocket') || 
-      msg.includes('vite') || 
-      msg.includes('HMR') || 
-      msg.includes('closed without opened')
-    ) {
+    if (isBenignError(msg)) {
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
     }
-  });
+  }, { capture: true });
 }
 
 createRoot(document.getElementById('root')!).render(

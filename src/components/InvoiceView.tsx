@@ -106,7 +106,8 @@ export default function InvoiceView({
   const gstRate = 0.18; // 18% GST for services
   const gstAmount = includeGst ? Math.round((subtotal - discount) * gstRate) : 0;
   const totalAmount = subtotal - discount + gstAmount;
-  const balanceDue = totalAmount - advance;
+  // User requested to remove Advance Paid from Invoice, so displayed balance due is the total amount
+  const balanceDue = totalAmount;
 
   const getQrCodeData = () => {
     if (qrType === 'upi' && upiId) {
@@ -310,10 +311,9 @@ export default function InvoiceView({
     doc.setFont('Helvetica', 'bold');
     doc.setFontSize(8);
     doc.setTextColor('#4B5563');
-    doc.text('Wedding Project / Couple & Shoot Details', 18, 109.5);
-    doc.text('Budget', 125, 109.5, { align: 'right' });
-    doc.text('Advance Paid', 160, 109.5, { align: 'right' });
-    doc.text('Outstanding Balance', 192, 109.5, { align: 'right' });
+    doc.text('Wedding Project / Couple & Details', 18, 109.5);
+    doc.text('Cinematic Deliverables', 85, 109.5);
+    doc.text('Budget', 192, 109.5, { align: 'right' });
 
     // Helper to draw consistent footer with or without signature
     const drawFooterOnPage = (pdfDoc: any, pageNum: number, isLastPage: boolean) => {
@@ -388,10 +388,9 @@ export default function InvoiceView({
         doc.setFont('Helvetica', 'bold');
         doc.setFontSize(8);
         doc.setTextColor('#4B5563');
-        doc.text('Wedding Project / Couple & Shoot Details (Continued)', 18, 32);
-        doc.text('Budget', 125, 32, { align: 'right' });
-        doc.text('Advance Paid', 160, 32, { align: 'right' });
-        doc.text('Outstanding Balance', 192, 32, { align: 'right' });
+        doc.text('Wedding Project / Couple & Details (Continued)', 18, 32);
+        doc.text('Cinematic Deliverables', 85, 32);
+        doc.text('Budget', 192, 32, { align: 'right' });
 
         currentY = 41;
       }
@@ -404,23 +403,28 @@ export default function InvoiceView({
       doc.setFont('Helvetica', 'normal');
       doc.setFontSize(7.5);
       doc.setTextColor('#6B7280');
-      doc.text(`${p.eventType} • Shoot: ${p.shootDate}`, 18, currentY + 4);
+      doc.text(`Shoot: ${p.shootDate}`, 18, currentY + 4);
 
+      // Draw Cinematic Deliverables at x = 85 with '+' formatting
       doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor('#4B5563');
+      const deliverablesText = p.eventType ? p.eventType.replace(/, /g, ' + ') : 'Wedding Film';
+      const lines = doc.splitTextToSize(deliverablesText, 95);
+      doc.text(lines, 85, currentY);
+
+      // Draw Budget at x = 192 (right-aligned)
+      doc.setFont('Helvetica', 'bold');
       doc.setFontSize(8.5);
       doc.setTextColor('#111827');
-      doc.text(`INR ${p.projectAmount.toLocaleString('en-IN')}`, 125, currentY, { align: 'right' });
-      doc.setTextColor('#10B981');
-      doc.text(`INR ${p.advancePayment.toLocaleString('en-IN')}`, 160, currentY, { align: 'right' });
-      doc.setFont('Helvetica', 'bold');
-      doc.setTextColor('#111827');
-      doc.text(`INR ${(p.projectAmount - p.advancePayment).toLocaleString('en-IN')}`, 192, currentY, { align: 'right' });
+      doc.text(`INR ${p.projectAmount.toLocaleString('en-IN')}`, 192, currentY, { align: 'right' });
 
+      const rowHeight = Math.max(12, 6 + (lines.length * 3.5));
       // Row separator
       doc.setDrawColor(243, 244, 246);
       doc.setLineWidth(0.3);
-      doc.line(15, currentY + 7, 195, currentY + 7);
-      currentY += 12;
+      doc.line(15, currentY + rowHeight - 5, 195, currentY + rowHeight - 5);
+      currentY += rowHeight;
     });
 
     if (studioProjects.length === 0) {
@@ -543,14 +547,6 @@ export default function InvoiceView({
       doc.text(`INR ${gstAmount.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
     }
 
-    calcY += 6;
-    doc.setFont('Helvetica', 'normal');
-    doc.setTextColor('#4B5563');
-    doc.text('TOTAL ADVANCES:', 125, calcY);
-    doc.setFont('Helvetica', 'bold');
-    doc.setTextColor('#10B981');
-    doc.text(`- INR ${advance.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
-
     // Total Due
     calcY += 8;
     doc.setFillColor(fillBgColor); // Soft champagne cream
@@ -558,9 +554,9 @@ export default function InvoiceView({
     doc.setFont('Helvetica', 'bold');
     doc.setFontSize(10);
     doc.setTextColor('#111827');
-    doc.text('TOTAL BALANCE DUE:', 125, calcY);
+    doc.text('TOTAL AMOUNT DUE:', 125, calcY);
     doc.setFont('Helvetica', 'extrabold');
-    doc.text(`INR ${balanceDue.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
+    doc.text(`INR ${totalAmount.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
 
     // Capture and embed payment QR Code inside the PDF
     const qrCanvas = document.getElementById('invoice-qr-canvas') as HTMLCanvasElement | null;
@@ -630,7 +626,7 @@ export default function InvoiceView({
       console.error('PDF generation failed:', err);
     }
 
-    const msg = `*THE FRAME CUT STUDIO OS - CONSOLIDATED LEDGER*%0A%0AInvoice ID: *${invoiceId}*%0APartner Studio: *${currentStudio.name}*%0ATotal Projects: *${studioProjects.length}*%0A%0A*Billing Summary:*%0AContract Value: ₹${subtotal.toLocaleString('en-IN')}%0AAdvances Received: ₹${advance.toLocaleString('en-IN')}%0A*Remaining Balance: ₹${balanceDue.toLocaleString('en-IN')}*%0A%0A📥 _Consolidated invoice statement PDF (${pdfFilename || 'Studio_Statement.pdf'}) has been generated and saved._%0A%0APlease clear outstanding balance before final master transfers. Thank you!`;
+    const msg = `*THE FRAME CUT STUDIO OS - CONSOLIDATED LEDGER*%0A%0AInvoice ID: *${invoiceId}*%0APartner Studio: *${currentStudio.name}*%0ATotal Projects: *${studioProjects.length}*%0A%0A*Billing Summary:*%0AContract Value: ₹${subtotal.toLocaleString('en-IN')}%0A*Total Amount Due: ₹${totalAmount.toLocaleString('en-IN')}*%0A%0A📥 _Consolidated invoice statement PDF (${pdfFilename || 'Studio_Statement.pdf'}) has been generated and saved._%0A%0APlease clear outstanding balance before final master transfers. Thank you!`;
     window.open(`https://api.whatsapp.com/send?text=${msg}`, '_blank');
     triggerToast("PDF Export & WhatsApp", "Consolidated invoice PDF downloaded and shared via WhatsApp!");
   };
@@ -638,7 +634,7 @@ export default function InvoiceView({
   const handleShareEmail = () => {
     if (!currentStudio) return;
     const subject = `Consolidated Wedding Post-Production Statement: ${invoiceId} - ${currentStudio.name}`;
-    const body = `Dear ${currentStudio.ownerName || 'Partner'},\n\nPlease find the outstanding consolidated invoice statement for your studio.\n\nTotal Projects: ${studioProjects.length}\nTotal Budget Value: INR ${subtotal.toLocaleString('en-IN')}\nTotal Advances Paid: INR ${advance.toLocaleString('en-IN')}\nOutstanding Balance Due: INR ${balanceDue.toLocaleString('en-IN')}\n\nPlease clear the balance due to proceed with master video downloads.\n\nBest regards,\nSatish Tiwari\nThe Frame Cut Studio OS`;
+    const body = `Dear ${currentStudio.ownerName || 'Partner'},\n\nPlease find the outstanding consolidated invoice statement for your studio.\n\nTotal Projects: ${studioProjects.length}\nTotal Budget Value: INR ${subtotal.toLocaleString('en-IN')}\nTotal Amount Due: INR ${totalAmount.toLocaleString('en-IN')}\n\nPlease clear the balance due to proceed with master video downloads.\n\nBest regards,\nSatish Tiwari\nThe Frame Cut Studio OS`;
     window.open(`mailto:${currentStudio.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
   };
 
@@ -695,6 +691,8 @@ export default function InvoiceView({
   const handleRegisterInvoice = async () => {
     if (!currentStudio) return;
     
+    const dbBalanceDue = Math.max(0, totalAmount - advance);
+
     await onAddInvoice({
       projectId: 'CONSOLIDATED',
       coupleName: `Consolidated - ${studioProjects.length} Projects`,
@@ -707,9 +705,9 @@ export default function InvoiceView({
       discount,
       totalAmount,
       amountPaid: advance,
-      balanceDue,
+      balanceDue: dbBalanceDue,
       gstNumber: currentStudio.gstNumber || undefined,
-      status: balanceDue <= 0 ? 'paid' : 'sent'
+      status: dbBalanceDue <= 0 ? 'paid' : 'sent'
     });
 
     triggerToast("Invoice Saved", "Consolidated studio invoice registered in company ledger!");
@@ -916,9 +914,8 @@ export default function InvoiceView({
                   <thead>
                     <tr className="border-b border-gold-500/15 text-[9px] font-mono text-stone-400 uppercase tracking-wider">
                       <th className="py-3 pl-2 font-semibold">Wedding Project / Details</th>
-                      <th className="py-3 text-right font-semibold">Budget</th>
-                      <th className="py-3 text-right font-semibold">Advance Paid</th>
-                      <th className="py-3 text-right pr-4 font-semibold">Balance Due</th>
+                      <th className="py-3 pl-4 font-semibold">Cinematic Deliverables</th>
+                      <th className="py-3 text-right pr-4 font-semibold">Budget</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gold-500/5 font-sans text-stone-700">
@@ -927,11 +924,14 @@ export default function InvoiceView({
                         <tr key={p.id} className="hover:bg-gold-500/[0.01] transition-colors break-inside-avoid page-break-inside-avoid">
                           <td className="py-4 pl-2">
                             <span className="font-bold text-stone-900 text-sm block tracking-wide">{p.coupleName}</span>
-                            <span className="block text-[10px] text-stone-400 mt-1 font-medium">{p.eventType} • Shoot: {p.shootDate}</span>
+                            <span className="block text-[10px] text-stone-400 mt-1 font-medium">Shoot: {p.shootDate}</span>
                           </td>
-                          <td className="py-4 text-right font-mono text-stone-800 text-xs">₹{p.projectAmount.toLocaleString('en-IN')}</td>
-                          <td className="py-4 text-right font-mono text-emerald-600 text-xs">₹{p.advancePayment.toLocaleString('en-IN')}</td>
-                          <td className="py-4 text-right font-mono font-bold text-stone-900 text-sm pr-4">₹{(p.projectAmount - p.advancePayment).toLocaleString('en-IN')}</td>
+                          <td className="py-4 pl-4 text-stone-600 max-w-[280px] break-words">
+                            <span className="text-[11px] leading-relaxed font-medium block">
+                              {p.eventType ? p.eventType.replace(/, /g, ' + ') : 'Wedding Film'}
+                            </span>
+                          </td>
+                          <td className="py-4 text-right font-mono font-bold text-stone-900 text-sm pr-4">₹{p.projectAmount.toLocaleString('en-IN')}</td>
                         </tr>
                       ))
                     ) : (
@@ -1038,13 +1038,9 @@ export default function InvoiceView({
                       <span className="text-stone-900 font-semibold">₹{gstAmount.toLocaleString('en-IN')}</span>
                     </div>
                   )}
-                  <div className="flex justify-between border-b border-gold-500/10 pb-2.5">
-                    <span className="text-stone-400">TOTAL ADVANCES:</span>
-                    <span className="text-emerald-600 font-semibold">- ₹{advance.toLocaleString('en-IN')}</span>
-                  </div>
                   <div className="flex justify-between text-sm font-bold text-stone-900 pt-1">
-                    <span className="text-stone-900 tracking-wide">TOTAL BALANCE DUE:</span>
-                    <span className="text-gold-700 font-sans font-black text-base">₹{balanceDue.toLocaleString('en-IN')}</span>
+                    <span className="text-stone-900 tracking-wide">TOTAL AMOUNT DUE:</span>
+                    <span className="text-gold-700 font-sans font-black text-base">₹{totalAmount.toLocaleString('en-IN')}</span>
                   </div>
                 </div>
               </div>

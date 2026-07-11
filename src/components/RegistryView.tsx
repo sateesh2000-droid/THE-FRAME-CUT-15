@@ -321,13 +321,15 @@ export default function RegistryView({
       const finalCouplePhoto = couplePhoto || DEFAULT_COVERS[0].url;
       const coupleName = `${groomName.trim()} & ${brideName.trim()}`;
 
+      const finalEventType = selectedFunctions.length > 0 ? selectedFunctions.join(', ') : eventType;
+
       await onAddProject({
         id: autoId,
         projectName: projectName.trim(),
         brideName: brideName.trim(),
         groomName: groomName.trim(),
         coupleName,
-        eventType: eventType,
+        eventType: finalEventType,
         studioId,
         studioName: selectedStudio ? selectedStudio.name : 'Direct Client',
         shootDate,

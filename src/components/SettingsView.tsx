@@ -133,7 +133,11 @@ export default function SettingsView({
 
       const saved = localStorage.getItem('tfc_passwords');
       if (saved) {
-        passwordsMap = JSON.parse(saved);
+        try {
+          passwordsMap = JSON.parse(saved);
+        } catch (e) {
+          console.error("Failed to parse tfc_passwords from localStorage. Using default map:", e);
+        }
       }
 
       const userEmail = currentUser?.email || 'anonymous';
