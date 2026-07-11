@@ -732,6 +732,14 @@ export default function App() {
             currentUser={currentUser}
             theme={theme}
             onThemeChange={setTheme}
+            projects={projects}
+            studios={studios}
+            editors={editors}
+            expenses={expenses}
+            invoices={invoices}
+            calendarEvents={calendarEvents}
+            revisions={revisions}
+            payments={payments}
           />
         );
       default:
