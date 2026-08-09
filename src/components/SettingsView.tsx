@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Settings, 
   Database, 
@@ -17,18 +17,21 @@ import {
   Cloud,
   CloudOff,
   Download,
-  FileJson
+  FileJson,
+  User,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+import { compressImage } from '../utils';
 import { 
   UserProfile,
   Project,
   Studio,
   Editor,
   Expense,
-  Invoice,
   CalendarEvent,
   Revision,
   PaymentHistory
@@ -38,13 +41,13 @@ interface SettingsViewProps {
   onResetDatabase: () => Promise<void>;
   isOnline: boolean;
   currentUser?: UserProfile | null;
-  theme?: 'luxury-green' | 'midnight-gold';
-  onThemeChange?: (theme: 'luxury-green' | 'midnight-gold') => void;
+  onUpdateProfile?: (updates: Partial<UserProfile>) => Promise<void>;
+  theme?: 'luxury-green' | 'midnight-gold' | 'royal-sapphire';
+  onThemeChange?: (theme: 'luxury-green' | 'midnight-gold' | 'royal-sapphire') => void;
   projects?: Project[];
   studios?: Studio[];
   editors?: Editor[];
   expenses?: Expense[];
-  invoices?: Invoice[];
   calendarEvents?: CalendarEvent[];
   revisions?: Revision[];
   payments?: PaymentHistory[];
@@ -54,13 +57,13 @@ export default function SettingsView({
   onResetDatabase, 
   isOnline, 
   currentUser,
+  onUpdateProfile,
   theme = 'luxury-green',
   onThemeChange,
   projects = [],
   studios = [],
   editors = [],
   expenses = [],
-  invoices = [],
   calendarEvents = [],
   revisions = [],
   payments = []
@@ -81,6 +84,74 @@ export default function SettingsView({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [passwordSuccess, setPasswordSuccess] = useState('');
+
+  // Profile update states
+  const [profileName, setProfileName] = useState(currentUser?.name || '');
+  const [profilePhotoURL, setProfilePhotoURL] = useState(currentUser?.photoURL || '');
+  const [profileError, setProfileError] = useState('');
+  const [profileSuccess, setProfileSuccess] = useState('');
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+
+  useEffect(() => {
+    if (currentUser) {
+      setProfileName(currentUser.name || '');
+      setProfilePhotoURL(currentUser.photoURL || '');
+    }
+  }, [currentUser]);
+
+  const presetAvatars = [
+    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200',
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200',
+    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200',
+    'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&q=80&w=200',
+    'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=200',
+    'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200'
+  ];
+
+  const handleProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileError('');
+    setProfileSuccess('');
+    setIsUpdatingProfile(true);
+
+    if (!profileName.trim()) {
+      setProfileError('Display name is required.');
+      setIsUpdatingProfile(false);
+      return;
+    }
+
+    try {
+      if (onUpdateProfile) {
+        await onUpdateProfile({
+          name: profileName,
+          photoURL: profilePhotoURL
+        });
+        setProfileSuccess('Profile updated successfully!');
+        setTimeout(() => setProfileSuccess(''), 4000);
+      } else {
+        setProfileError('Profile update function not available.');
+      }
+    } catch (err: any) {
+      setProfileError(err.message || 'Failed to update profile.');
+    } finally {
+      setIsUpdatingProfile(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        if (typeof reader.result === 'string') {
+          const compressed = await compressImage(reader.result, 300, 300, 0.7);
+          setProfilePhotoURL(compressed);
+        }
+        setProfileError("");
+      };
+      reader.readAsDataURL(file);
+    }
+  };
   
   const handleReset = async () => {
     setIsResetting(true);
@@ -183,7 +254,6 @@ export default function SettingsView({
         studios: studios.length,
         editors: editors.length,
         expenses: expenses.length,
-        invoices: invoices.length,
         calendarEvents: calendarEvents.length,
         revisions: revisions.length,
         payments: payments.length
@@ -193,7 +263,6 @@ export default function SettingsView({
         studios,
         editors,
         expenses,
-        invoices,
         calendarEvents,
         revisions,
         payments
@@ -219,7 +288,6 @@ export default function SettingsView({
             studios: studios.length,
             editors: editors.length,
             expenses: expenses.length,
-            invoices: invoices.length,
             calendarEvents: calendarEvents.length,
             revisions: revisions.length,
             payments: payments.length
@@ -265,6 +333,145 @@ export default function SettingsView({
       {/* Main Blocks */}
       <div className="space-y-4">
 
+        {/* User Profile Settings Block */}
+        <div className="p-6 rounded-3xl bg-charcoal-900 border border-luxury-green-800/15 space-y-5">
+          <h3 className="text-sm font-bold font-display text-white flex items-center space-x-3">
+            <div className="p-2.5 bg-gold-500/10 rounded-xl text-gold-400 border border-gold-500/20">
+              <User className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-sm font-bold text-white tracking-tight block font-display">User Profile Details</span>
+              <p className="text-[9px] text-gray-400 font-mono mt-0.5 uppercase tracking-widest">Update your name and premium brand avatar</p>
+            </div>
+          </h3>
+
+          {profileError && (
+            <div className="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-xs text-red-400">
+              {profileError}
+            </div>
+          )}
+          {profileSuccess && (
+            <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-400">
+              {profileSuccess}
+            </div>
+          )}
+
+          <form onSubmit={handleProfileSubmit} className="space-y-5">
+            {/* Visual Avatar Editor Interface */}
+            <div className="flex flex-col sm:flex-row items-center gap-5 bg-charcoal-950/40 p-4.5 rounded-2xl border border-luxury-green-900/10">
+              <div className="relative group shrink-0">
+                <img
+                  src={profilePhotoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=100'}
+                  alt="Profile Preview"
+                  className="w-20 h-20 rounded-2xl object-cover border border-gold-500/30 shadow-lg"
+                />
+                <div className="absolute inset-0 bg-black/60 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                  <Upload className="w-5 h-5 text-gold-400" />
+                </div>
+              </div>
+
+              <div className="flex-1 space-y-2 text-center sm:text-left">
+                <span className="text-xs font-semibold text-gray-200">Modify profile photograph</span>
+                <p className="text-[10px] text-gray-500 leading-normal">
+                  Upload a local JPEG/PNG file, select from our curated premium avatars, or paste a custom image link below.
+                </p>
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
+                  <label className="px-3.5 py-1.5 bg-luxury-green-800/20 hover:bg-luxury-green-800/40 border border-luxury-green-500/20 text-gold-400 text-[10px] font-mono font-bold rounded-lg cursor-pointer transition-colors flex items-center space-x-1.5">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Upload File</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Premium Avatar Grid Selection */}
+            <div className="space-y-2.5">
+              <span className="block text-[10px] font-mono text-gray-500 uppercase tracking-wider">Curated Preset Avatars</span>
+              <div className="grid grid-cols-6 gap-2.5">
+                {presetAvatars.map((url, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setProfilePhotoURL(url)}
+                    className={`relative rounded-xl overflow-hidden aspect-square border transition-all hover:scale-105 cursor-pointer ${
+                      profilePhotoURL === url 
+                        ? 'border-gold-500 ring-2 ring-gold-500/20 shadow-[0_0_12px_rgba(212,175,55,0.25)] scale-102' 
+                        : 'border-white/5 opacity-65 hover:opacity-100'
+                    }`}
+                  >
+                    <img src={url} alt={`Avatar Preset ${idx + 1}`} className="w-full h-full object-cover" />
+                    {profilePhotoURL === url && (
+                      <div className="absolute inset-0 bg-gold-500/10 flex items-center justify-center">
+                        <div className="bg-gold-500 text-charcoal-950 rounded-full p-0.5 border border-charcoal-950">
+                          <Check className="w-2 h-2 stroke-[3]" />
+                        </div>
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Form Fields: Name & Custom Image Link */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-mono text-gray-500 uppercase mb-1.5">Display Name</label>
+                <div className="relative">
+                  <User className="absolute left-3.5 top-3 w-4 h-4 text-gray-500" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="E.g. Satish Tiwari"
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    className="w-full pl-11 pr-4 py-2.5 bg-charcoal-950 border border-luxury-green-800/30 rounded-xl text-xs text-white focus:outline-none focus:border-gold-500/40"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono text-gray-500 uppercase mb-1.5">Custom Image URL</label>
+                <div className="relative">
+                  <ImageIcon className="absolute left-3.5 top-3 w-4 h-4 text-gray-500" />
+                  <input
+                    type="url"
+                    placeholder="Paste image link: https://..."
+                    value={profilePhotoURL.startsWith('data:') ? '' : profilePhotoURL}
+                    onChange={(e) => setProfilePhotoURL(e.target.value)}
+                    className="w-full pl-11 pr-4 py-2.5 bg-charcoal-950 border border-luxury-green-800/30 rounded-xl text-xs text-white focus:outline-none focus:border-gold-500/40"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="submit"
+                disabled={isUpdatingProfile}
+                className="flex items-center space-x-1.5 px-4.5 py-2.5 bg-gradient-to-r from-gold-600 to-gold-500 hover:from-gold-500 hover:to-gold-400 text-charcoal-950 font-bold text-xs rounded-xl transition-all cursor-pointer shadow-md hover:scale-[1.01] active:scale-[0.99] disabled:opacity-55"
+              >
+                {isUpdatingProfile ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Updating Profile...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4 shrink-0 stroke-[3]" />
+                    <span>Save Profile Changes</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+
         {/* Color Palette Toggle Block */}
         <div className="p-6 rounded-3xl bg-charcoal-900 border border-luxury-green-800/15 space-y-4">
           <h3 className="text-sm font-bold font-display text-white flex items-center space-x-3">
@@ -278,10 +485,10 @@ export default function SettingsView({
           </h3>
 
           <p className="text-xs text-gray-400 leading-relaxed">
-            Customize the look and feel of your ERP workspace. Choose between the deep, signature <strong className="text-luxury-green-500">Luxury Green</strong> of Frame Cut Studio or the high-contrast warmth of <strong className="text-gold-400">Midnight Gold</strong>.
+            Customize the look and feel of your ERP workspace. Choose between the deep <strong className="text-luxury-green-500">Luxury Green</strong> of Frame Cut Studio, the high-contrast warmth of <strong className="text-gold-400">Midnight Gold</strong>, or the regal <strong className="text-blue-400">Royal Sapphire</strong> theme.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Luxury Green Card Option */}
             <button
               id="theme-opt-green"
@@ -301,7 +508,7 @@ export default function SettingsView({
                 </div>
                 <div>
                   <span className="text-xs font-bold block">Luxury Green</span>
-                  <span className="text-[10px] text-gray-500">Default Brand Palette</span>
+                  <span className="text-[10px] text-gray-500">Default Brand</span>
                 </div>
               </div>
               <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
@@ -330,13 +537,42 @@ export default function SettingsView({
                 </div>
                 <div>
                   <span className="text-xs font-bold block">Midnight Gold</span>
-                  <span className="text-[10px] text-gray-500">Amber & Obsidian Tones</span>
+                  <span className="text-[10px] text-gray-500">Amber & Obsidian</span>
                 </div>
               </div>
               <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
                 theme === 'midnight-gold' ? 'border-gold-500 bg-gold-500 text-charcoal-950' : 'border-gray-600'
               }`}>
                 {theme === 'midnight-gold' && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+              </div>
+            </button>
+
+            {/* Royal Sapphire Card Option */}
+            <button
+              id="theme-opt-sapphire"
+              onClick={() => onThemeChange?.('royal-sapphire')}
+              className={`p-4 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between group ${
+                theme === 'royal-sapphire'
+                  ? 'bg-blue-950/30 border-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.2)]'
+                  : 'bg-charcoal-950/60 border-luxury-green-800/10 text-gray-400 hover:border-luxury-green-800/30'
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                {/* Visual indicator of colors */}
+                <div className="flex -space-x-1.5">
+                  <div className="w-3.5 h-3.5 rounded-full bg-blue-950 border border-charcoal-950" />
+                  <div className="w-3.5 h-3.5 rounded-full bg-blue-600 border border-charcoal-950" />
+                  <div className="w-3.5 h-3.5 rounded-full bg-sky-400 border border-charcoal-950" />
+                </div>
+                <div>
+                  <span className="text-xs font-bold block">Royal Sapphire</span>
+                  <span className="text-[10px] text-gray-500">Navy & Platinum</span>
+                </div>
+              </div>
+              <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                theme === 'royal-sapphire' ? 'border-blue-500 bg-blue-500 text-white' : 'border-gray-600'
+              }`}>
+                {theme === 'royal-sapphire' && <Check className="w-2.5 h-2.5 stroke-[3]" />}
               </div>
             </button>
           </div>
@@ -581,7 +817,7 @@ export default function SettingsView({
                 <div>
                   <h3 className="text-lg font-bold text-white font-display">Reset Seeding Database</h3>
                   <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">
-                    Are you sure you want to reset the entire database to factory seeding configurations? This will delete all current records and restore default weddings, partners, expenses, and invoices.
+                    Are you sure you want to reset the entire database to factory seeding configurations? This will delete all current records and restore default weddings, partners, and expenses.
                   </p>
                 </div>
               </div>

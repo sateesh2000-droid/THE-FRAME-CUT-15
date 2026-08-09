@@ -160,6 +160,28 @@ body[data-theme="midnight-gold"] .organic-green-leaf-gradient {
   background: linear-gradient(135deg, #423624 0%, #16130e 100%);
 }
 
+/* Dynamic Royal Sapphire Theme Overrides */
+body[data-theme="royal-sapphire"] {
+  --color-luxury-green-950: #070b19;
+  --color-luxury-green-900: #0d152e;
+  --color-luxury-green-800: #1a274c;
+  --color-luxury-green-700: #283a6d;
+  --color-luxury-green-600: #3b5292;
+  --color-luxury-green-500: #2563eb;
+}
+
+body[data-theme="royal-sapphire"] ::-webkit-scrollbar-thumb {
+  background: #1a274c;
+}
+
+body[data-theme="royal-sapphire"] .organic-bg-green {
+  background: linear-gradient(135deg, #0d152e 0%, #1a274c 100%);
+}
+
+body[data-theme="royal-sapphire"] .organic-green-leaf-gradient {
+  background: linear-gradient(135deg, #283a6d 0%, #0d152e 100%);
+}
+
 /* Smooth theme cross-fade transition definition */
 .theme-transition,
 .theme-transition * {
@@ -171,131 +193,7 @@ body[data-theme="midnight-gold"] .organic-green-leaf-gradient {
               box-shadow 0.8s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-/* Luxury Multi-page Invoice Print Styles */
-@media print {
-  /* Suppress layout headers, sidebars, buttons and modals */
-  .print\:hidden,
-  aside,
-  nav,
-  button,
-  header,
-  footer,
-  .glass-panel,
-  [id^="btn-"],
-  div[class*="Sidebar"],
-  div[class*="sidebar"] {
-    display: none !important;
-  }
 
-  /* Reset outer container page constraints to allow vertical pagination flow */
-  html, body {
-    background: #FCFBF7 !important;
-    background-color: #FCFBF7 !important;
-    color: #1c1917 !important;
-    font-size: 11pt !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    overflow: visible !important;
-    height: auto !important;
-  }
-
-  #root {
-    background: transparent !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    overflow: visible !important;
-    height: auto !important;
-  }
-
-  /* Remove any absolute/fixed flex containers or layout limits */
-  div.flex, main, #main-content-flow {
-    display: block !important;
-    overflow: visible !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    background: transparent !important;
-    height: auto !important;
-    min-height: 0 !important;
-  }
-
-  .grid {
-    display: block !important;
-    gap: 0 !important;
-  }
-
-  /* Force the sidebar spacer to hide on print */
-  .hidden.md\:block.w-24.shrink-0 {
-    display: none !important;
-  }
-
-  /* Style the invoice document container as a clean full-width print page */
-  .printable-invoice-container {
-    box-shadow: none !important;
-    border: none !important;
-    border-radius: 0 !important;
-    padding: 10mm !important; /* Professional margin inside A4 size */
-    margin: 0 auto !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    min-height: 0 !important;
-    height: auto !important;
-    overflow: visible !important;
-    background: #FCFBF7 !important;
-    background-color: #FCFBF7 !important;
-    display: block !important;
-  }
-
-  /* Prevent awkward page break splits inside logical document blocks */
-  .invoice-header,
-  .invoice-client-info,
-  .invoice-summary,
-  .invoice-signature,
-  .invoice-bank-details,
-  .invoice-qr-block,
-  .break-inside-avoid,
-  .page-break-inside-avoid {
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  /* Specific styling and color retention for Bank Details and QR Code on print */
-  .invoice-bank-details,
-  .invoice-qr-block {
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-    display: block !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-
-  /* Adjust spacing slightly to ensure aesthetic fit at the bottom of the page */
-  .invoice-bank-details {
-    margin-top: 4px !important;
-    background-color: rgba(197, 160, 89, 0.03) !important;
-    border: 1px solid rgba(197, 160, 89, 0.15) !important;
-  }
-
-  .invoice-qr-block {
-    margin-top: 12px !important;
-    background-color: #FAF7F0 !important;
-    border: 1px solid rgba(197, 160, 89, 0.15) !important;
-  }
-
-  /* Table-specific pagination flow rules */
-  table {
-    width: 100% !important;
-    page-break-inside: auto !important;
-  }
-
-  tr {
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  thead {
-    display: table-header-group !important;
-  }
-}
 
 /* Suppress development-only overlays like Vite error screen for smoother iframe preview */
 vite-error-overlay,

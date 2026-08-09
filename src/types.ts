@@ -102,29 +102,11 @@ export interface Revision {
 export interface Expense {
   id: string;
   amount: number;
-  category: 'hard_disk' | 'internet' | 'office_rent' | 'electricity' | 'travel' | 'freelance_editor' | 'other';
+  category: 'hard_disk' | 'internet' | 'office_rent' | 'electricity' | 'travel' | 'freelance_editor' | 'other' | string;
   date: string;
   description: string;
   projectId?: string; // Optional links to projects
-  createdAt: any;
-}
-
-export interface Invoice {
-  id: string; // Invoice ID e.g., "INV-2026-001"
-  projectId: string;
-  coupleName: string;
-  studioId: string;
-  studioName: string;
-  invoiceDate: string;
-  dueDate: string;
-  subtotal: number;
-  gstAmount: number;
-  discount: number;
-  totalAmount: number;
-  amountPaid: number;
-  balanceDue: number;
-  gstNumber?: string;
-  status: 'draft' | 'sent' | 'paid' | 'overdue';
+  paymentMethod?: string;
   createdAt: any;
 }
 
@@ -138,6 +120,7 @@ export interface PaymentHistory {
   date: string;
   paymentMethod: string; // Cash, Bank Transfer, GPay, etc.
   notes?: string;
+  receivedFrom?: string; // Person who initiated or made the payment
   createdAt: any;
 }
 
@@ -156,9 +139,11 @@ export interface AppNotification {
   id: string;
   title: string;
   message: string;
-  type: 'delivery_tomorrow' | 'payment_pending' | 'invoice_pending' | 'project_completed' | 'new_assignment' | 'revision_request';
+  type: 'delivery_tomorrow' | 'payment_pending' | 'project_completed' | 'new_assignment' | 'revision_request';
   projectId?: string;
   studioId?: string;
+  calendarEventId?: string;
+  isAutomated?: boolean;
   read: boolean;
   createdAt: any;
 }
@@ -171,4 +156,61 @@ export interface CalendarEvent {
   projectId?: string;
   coupleName?: string;
   color: string;
+}
+
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  eventType: string;
+  deliverables: string[];
+  milestones: string[];
+  priority: ProjectPriority;
+  defaultProjectAmount?: number;
+  defaultEditorPayment?: number;
+  notes?: string;
+  isDefault?: boolean;
+  createdAt?: any;
+}
+
+export interface StudioInvoiceProjectItem {
+  projectId: string;
+  coupleName: string;
+  projectType: string;
+  amount: number;
+  status: string;
+  invoiceStatus: string;
+  selected: boolean;
+}
+
+export interface StudioAdvancePaymentItem {
+  id: string;
+  date: string;
+  paidBy: string;
+  paymentMode: string;
+  amount: number;
+  adjusted: boolean;
+}
+
+export interface StudioInvoice {
+  id: string; // e.g. "AI-2026-0015"
+  studioId: string;
+  studioName: string;
+  date: string;
+  projects: StudioInvoiceProjectItem[];
+  advances: StudioAdvancePaymentItem[];
+  projectTotal: number;
+  advanceTotal: number;
+  previousBalance: number;
+  discount: number;
+  totalPayable: number;
+  paymentStatus: 'Full Payment' | 'Partial Payment' | 'Unpaid';
+  accountHolder: string;
+  bankName: string;
+  accountNumber: string;
+  ifscCode: string;
+  upiId: string;
+  driveLink?: string;
+  notes?: string;
+  createdAt?: any;
 }

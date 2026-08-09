@@ -17,6 +17,7 @@ import {
   FileEdit,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
   Info,
   Sparkles,
   AlertTriangle,
@@ -37,11 +38,23 @@ import {
   Coins,
   TrendingUp,
   Sliders,
-  CheckSquare
+  CheckSquare,
+  Zap,
+  Play,
+  Flame,
+  Activity,
+  GitCompare,
+  ArrowLeftRight,
+  ArrowUpDown,
+  Calendar,
+  FileText,
+  Printer
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import SwipeableCard from './SwipeableCard';
-import { Project, Studio, Editor, ProjectStatus, ProjectPriority, Revision, UserRole } from '../types';
+import ParallaxCard from './ParallaxCard';
+import ProjectWorksheetModal from './ProjectWorksheetModal';
+import { Project, Studio, Editor, ProjectStatus, ProjectPriority, Revision, UserRole, CalendarEvent } from '../types';
 import { useDebounce } from '../hooks/useDebounce';
 
 interface ProjectsViewProps {
@@ -49,6 +62,7 @@ interface ProjectsViewProps {
   studios: Studio[];
   editors: Editor[];
   revisions: Revision[];
+  calendarEvents?: CalendarEvent[];
   userRole: UserRole;
   currentStudioId?: string;
   onAddProject: (project: Omit<Project, 'createdAt' | 'updatedAt'>) => Promise<void>;
@@ -62,21 +76,21 @@ interface ProjectsViewProps {
 }
 
 const WORKFLOW_STAGES: { id: ProjectStatus; label: string; color: string; bg: string }[] = [
-  { id: 'data_received', label: 'In Progress • Received', color: 'text-gold-300', bg: 'bg-gold-500/5 border border-gold-500/10 font-medium' },
-  { id: 'assigned', label: 'In Progress • Assigned', color: 'text-gold-300', bg: 'bg-gold-500/5 border border-gold-500/10 font-medium' },
-  { id: 'editing', label: 'Editing • Active', color: 'text-gold-400', bg: 'bg-gold-500/15 border border-gold-400/25 font-bold animate-pulse-slow' },
-  { id: 'review', label: 'In Progress • Review', color: 'text-gold-300', bg: 'bg-gold-500/5 border border-gold-500/10 font-medium' },
-  { id: 'revision', label: 'In Progress • Revision', color: 'text-gold-300', bg: 'bg-gold-500/5 border border-gold-500/10 font-medium' },
-  { id: 'rendering', label: 'In Progress • Rendering', color: 'text-gold-300', bg: 'bg-gold-500/5 border border-gold-500/10 font-medium' },
-  { id: 'delivered', label: 'Finished • Delivered', color: 'text-luxury-green-500', bg: 'bg-luxury-green-500/10 border border-luxury-green-500/20 font-bold' },
-  { id: 'closed', label: 'Finished • Closed', color: 'text-luxury-green-600', bg: 'bg-luxury-green-950 border border-luxury-green-900/10 font-medium' }
+  { id: 'data_received', label: 'In Progress • Received', color: 'text-sky-300', bg: 'bg-sky-500/20 border border-sky-400/30 font-semibold' },
+  { id: 'assigned', label: 'In Progress • Assigned', color: 'text-indigo-300', bg: 'bg-indigo-500/20 border border-indigo-400/30 font-semibold' },
+  { id: 'editing', label: 'Editing • Active', color: 'text-amber-300', bg: 'bg-amber-500/25 border border-amber-400/40 font-bold' },
+  { id: 'review', label: 'In Progress • Review', color: 'text-purple-300', bg: 'bg-purple-500/20 border border-purple-400/30 font-semibold' },
+  { id: 'revision', label: 'In Progress • Revision', color: 'text-rose-300', bg: 'bg-rose-500/20 border border-rose-400/40 font-bold' },
+  { id: 'rendering', label: 'In Progress • Rendering', color: 'text-teal-300', bg: 'bg-teal-500/20 border border-teal-400/30 font-semibold' },
+  { id: 'delivered', label: 'Finished • Delivered', color: 'text-emerald-300', bg: 'bg-emerald-500/25 border border-emerald-400/40 font-bold' },
+  { id: 'closed', label: 'Finished • Closed', color: 'text-slate-300', bg: 'bg-slate-800/80 border border-slate-700 font-medium' }
 ];
 
-const PRIORITIES: { id: ProjectPriority; label: string; color: string; bg: string }[] = [
-  { id: 'low', label: 'Low', color: 'text-gray-400', bg: 'bg-gray-500/10' },
-  { id: 'medium', label: 'Medium', color: 'text-sky-400', bg: 'bg-sky-500/10' },
-  { id: 'high', label: 'High', color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
-  { id: 'urgent', label: 'Urgent', color: 'text-red-400', bg: 'bg-red-500/10' }
+const PRIORITIES: { id: ProjectPriority; label: string; color: string; bg: string; glowBorder: string; icon: string }[] = [
+  { id: 'low', label: 'Low', color: 'text-emerald-300', bg: 'bg-emerald-500/15 border-emerald-500/30', glowBorder: 'border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.15)]', icon: '🌱' },
+  { id: 'medium', label: 'Medium', color: 'text-sky-300', bg: 'bg-sky-500/20 border-sky-400/40', glowBorder: 'border-sky-400/80 shadow-[0_0_15px_rgba(56,189,248,0.25)] ring-1 ring-sky-400/30', icon: '⚡' },
+  { id: 'high', label: 'High', color: 'text-amber-300', bg: 'bg-amber-500/20 border-amber-400/50', glowBorder: 'border-amber-400/90 shadow-[0_0_18px_rgba(251,191,36,0.35)] ring-1 ring-amber-400/40', icon: '🔥' },
+  { id: 'urgent', label: 'Urgent', color: 'text-rose-300', bg: 'bg-rose-500/20 border-rose-500/50', glowBorder: 'border-rose-500/90 shadow-[0_0_22px_rgba(244,63,94,0.45)] ring-1 ring-rose-500/50 animate-pulse-slow', icon: '🚨' }
 ];
 
 const DEFAULT_COVERS = [
@@ -129,11 +143,496 @@ const compressImage = (base64Str: string, maxWidth = 800, maxHeight = 800, quali
   });
 };
 
+interface ProjectTimelineProps {
+  project: Project;
+  calendarEvents?: CalendarEvent[];
+  revisions: Revision[];
+  onUpdateProject: (id: string, updates: Partial<Project>) => Promise<void>;
+  setSelectedProject: React.Dispatch<React.SetStateAction<Project | null>>;
+}
+
+const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
+  project,
+  calendarEvents = [],
+  revisions = [],
+  onUpdateProject,
+  setSelectedProject,
+}) => {
+  const [viewMode, setViewMode] = useState<'roadmap' | 'stream'>('roadmap');
+  const [filterType, setFilterType] = useState<'all' | 'shoot_deadline' | 'calendar' | 'milestones' | 'revisions'>('all');
+  const [newMilestoneInput, setNewMilestoneInput] = useState('');
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
+
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+
+  const allNodes = useMemo(() => {
+    const list: {
+      id: string;
+      title: string;
+      date: string;
+      formattedDate: string;
+      type: 'shoot' | 'deadline' | 'calendar' | 'milestone' | 'revision';
+      status: 'completed' | 'in_progress' | 'pending' | 'overdue';
+      description?: string;
+      color: string;
+      milestoneId?: string;
+      isCustomMilestone?: boolean;
+      revisionStatus?: 'pending' | 'resolved';
+    }[] = [];
+
+    const formatDate = (dStr: string) => {
+      if (!dStr) return 'TBD';
+      try {
+        const d = new Date(dStr);
+        return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+      } catch {
+        return dStr;
+      }
+    };
+
+    // 1. Shoot Date
+    if (project.shootDate) {
+      const isPast = project.shootDate <= todayStr;
+      list.push({
+        id: `node-shoot-${project.id}`,
+        title: `${project.eventType || 'Production'} Shoot`,
+        date: project.shootDate,
+        formattedDate: formatDate(project.shootDate),
+        type: 'shoot',
+        status: isPast ? 'completed' : 'in_progress',
+        description: `Shoot Location: ${project.location || 'Logged in ERP'}`,
+        color: '#10b981'
+      });
+    }
+
+    // 2. Calendar Events linked to project
+    const projCalendarEvents = (calendarEvents || []).filter(e => {
+      if (e.projectId && e.projectId === project.id) return true;
+      if (e.coupleName && project.coupleName && e.coupleName.toLowerCase().trim() === project.coupleName.toLowerCase().trim()) return true;
+      if (e.title && project.coupleName && e.title.toLowerCase().includes(project.coupleName.toLowerCase())) return true;
+      return false;
+    });
+
+    projCalendarEvents.forEach(evt => {
+      list.push({
+        id: `node-cal-${evt.id}`,
+        title: evt.title,
+        date: evt.start,
+        formattedDate: formatDate(evt.start),
+        type: 'calendar',
+        status: evt.start <= todayStr ? 'completed' : 'pending',
+        description: `Calendar Schedule (${evt.type.toUpperCase()})`,
+        color: evt.color || '#3b82f6'
+      });
+    });
+
+    // 3. Custom Milestones
+    if (project.customMilestones && project.customMilestones.length > 0) {
+      project.customMilestones.forEach(m => {
+        const milestoneDate = m.completedAt ? m.completedAt.split('T')[0] : (project.deliveryDate || project.shootDate || todayStr);
+        list.push({
+          id: `node-ms-${m.id}`,
+          title: m.label,
+          date: milestoneDate,
+          formattedDate: formatDate(milestoneDate),
+          type: 'milestone',
+          status: m.completed ? 'completed' : 'pending',
+          description: m.completed 
+            ? `Done on ${new Date(m.completedAt!).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}` 
+            : 'Custom Milestone Target',
+          color: m.completed ? '#10b981' : '#f59e0b',
+          milestoneId: m.id,
+          isCustomMilestone: true
+        });
+      });
+    }
+
+    // 4. Revisions
+    const projectRevisions = (revisions || []).filter(r => r.projectId === project.id);
+    projectRevisions.forEach(rev => {
+      list.push({
+        id: `node-rev-${rev.id}`,
+        title: `Revision #${rev.revisionNumber}`,
+        date: rev.date,
+        formattedDate: formatDate(rev.date),
+        type: 'revision',
+        status: rev.status === 'resolved' ? 'completed' : 'pending',
+        description: rev.notes,
+        color: rev.status === 'resolved' ? '#10b981' : '#f43f5e',
+        revisionStatus: rev.status
+      });
+    });
+
+    // 5. Final Delivery Deadline
+    if (project.deliveryDate) {
+      const isDelivered = ['delivered', 'closed'].includes(project.status);
+      const isOverdue = !isDelivered && project.deliveryDate < todayStr;
+      list.push({
+        id: `node-dl-${project.id}`,
+        title: 'Final Delivery Deadline',
+        date: project.deliveryDate,
+        formattedDate: formatDate(project.deliveryDate),
+        type: 'deadline',
+        status: isDelivered ? 'completed' : (isOverdue ? 'overdue' : 'pending'),
+        description: isDelivered ? 'Project Successfully Handed Over' : (isOverdue ? 'Deadline Exceeded' : 'Target Handover Date'),
+        color: isDelivered ? '#10b981' : (isOverdue ? '#ef4444' : '#eab308')
+      });
+    }
+
+    // Sort chronologically
+    return list.sort((a, b) => {
+      if (a.date !== b.date) {
+        return a.date.localeCompare(b.date);
+      }
+      const typeRank = { shoot: 1, calendar: 2, milestone: 3, revision: 4, deadline: 5 };
+      return (typeRank[a.type] || 3) - (typeRank[b.type] || 3);
+    });
+  }, [project, calendarEvents, revisions, todayStr]);
+
+  const filteredNodes = useMemo(() => {
+    if (filterType === 'shoot_deadline') return allNodes.filter(n => n.type === 'shoot' || n.type === 'deadline');
+    if (filterType === 'calendar') return allNodes.filter(n => n.type === 'calendar');
+    if (filterType === 'milestones') return allNodes.filter(n => n.type === 'milestone');
+    if (filterType === 'revisions') return allNodes.filter(n => n.type === 'revision');
+    return allNodes;
+  }, [allNodes, filterType]);
+
+  const completedCount = useMemo(() => allNodes.filter(n => n.status === 'completed').length, [allNodes]);
+  const progressPercent = useMemo(() => {
+    if (allNodes.length === 0) return 0;
+    return Math.round((completedCount / allNodes.length) * 100);
+  }, [completedCount, allNodes.length]);
+
+  const handleToggleMilestone = async (milestoneId: string) => {
+    const updated = (project.customMilestones || []).map(item =>
+      item.id === milestoneId ? { ...item, completed: !item.completed, completedAt: !item.completed ? new Date().toISOString() : undefined } : item
+    );
+    await onUpdateProject(project.id, { customMilestones: updated });
+    setSelectedProject({ ...project, customMilestones: updated });
+  };
+
+  const handleAddMilestone = async () => {
+    if (!newMilestoneInput.trim()) return;
+    const newStep = {
+      id: `milestone-${Date.now()}`,
+      label: newMilestoneInput.trim(),
+      completed: false
+    };
+    const updated = [...(project.customMilestones || []), newStep];
+    await onUpdateProject(project.id, { customMilestones: updated });
+    setSelectedProject({ ...project, customMilestones: updated });
+    setNewMilestoneInput('');
+  };
+
+  return (
+    <div className="p-5 rounded-3xl bg-gradient-to-br from-charcoal-950 via-charcoal-900 to-charcoal-950 border border-luxury-green-800/25 space-y-4 shadow-xl relative overflow-hidden">
+      {/* Decorative ambient background blur */}
+      <div className="absolute -top-10 -right-10 w-40 h-40 bg-gold-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Header & Controls */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative z-10">
+        <div>
+          <div className="flex items-center space-x-2">
+            <Activity className="w-4 h-4 text-gold-400" />
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gold-500 font-mono">
+              Project Milestones & Calendar Timeline
+            </h3>
+          </div>
+          <p className="text-[10px] text-gray-400 mt-0.5">
+            Synchronized roadmap tracking calendar schedules, milestones & deadlines
+          </p>
+        </div>
+
+        {/* View Mode Switcher */}
+        <div className="flex items-center bg-charcoal-950 p-1 rounded-xl border border-luxury-green-800/20 shrink-0 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setViewMode('roadmap')}
+            className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
+              viewMode === 'roadmap'
+                ? 'bg-gold-500 text-charcoal-950 shadow-sm'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Roadmap Track
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('stream')}
+            className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
+              viewMode === 'stream'
+                ? 'bg-gold-500 text-charcoal-950 shadow-sm'
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Chronological Stream
+          </button>
+        </div>
+      </div>
+
+      {/* Progress Metric Bar */}
+      <div className="bg-charcoal-950/80 p-3 rounded-2xl border border-luxury-green-800/15 space-y-2 relative z-10">
+        <div className="flex items-center justify-between text-[10px] font-mono">
+          <span className="text-gray-400 flex items-center space-x-1.5">
+            <span className="w-2 h-2 rounded-full bg-gold-400 inline-block animate-pulse" />
+            <span>Overall Roadmap Completion</span>
+          </span>
+          <span className="text-gold-400 font-bold">
+            {completedCount} / {allNodes.length} Nodes ({progressPercent}%)
+          </span>
+        </div>
+        <div className="w-full bg-charcoal-900 h-2 rounded-full overflow-hidden border border-white/5">
+          <div
+            className="h-full bg-gradient-to-r from-emerald-500 via-gold-400 to-amber-500 transition-all duration-500 rounded-full"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Filter Category Pills */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar relative z-10 text-[10px] font-mono">
+        {[
+          { id: 'all', label: `All (${allNodes.length})` },
+          { id: 'shoot_deadline', label: 'Shoot & Deadline' },
+          { id: 'calendar', label: `Calendar (${allNodes.filter(n => n.type === 'calendar').length})` },
+          { id: 'milestones', label: `Milestones (${allNodes.filter(n => n.type === 'milestone').length})` },
+          { id: 'revisions', label: `Revisions (${allNodes.filter(n => n.type === 'revision').length})` },
+        ].map(flt => (
+          <button
+            key={flt.id}
+            type="button"
+            onClick={() => setFilterType(flt.id as any)}
+            className={`px-2.5 py-1 rounded-lg border whitespace-nowrap transition-all cursor-pointer ${
+              filterType === flt.id
+                ? 'bg-luxury-green-800/80 text-gold-400 border-gold-500/40 font-bold'
+                : 'bg-charcoal-950/50 text-gray-400 border-luxury-green-800/10 hover:border-luxury-green-800/30 hover:text-gray-200'
+            }`}
+          >
+            {flt.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Timeline Content */}
+      {filteredNodes.length > 0 ? (
+        viewMode === 'roadmap' ? (
+          /* Horizontal Visual Roadmap Track */
+          <div className="relative z-10 bg-charcoal-950/60 p-4 rounded-2xl border border-luxury-green-800/15">
+            <div className="overflow-x-auto custom-scrollbar pb-3 pt-2">
+              <div className="min-w-[620px] flex items-center justify-between relative px-6 py-6">
+                {/* Horizontal Connecting Line */}
+                <div className="absolute left-8 right-8 top-1/2 -translate-y-1/2 h-1 bg-charcoal-800 border-t border-b border-luxury-green-800/20 z-0" />
+
+                {filteredNodes.map((node) => {
+                  const isCompleted = node.status === 'completed';
+                  const isOverdue = node.status === 'overdue';
+                  const isActive = activeNodeId === node.id;
+
+                  return (
+                    <div
+                      key={node.id}
+                      className="relative z-10 flex flex-col items-center group cursor-pointer"
+                      onClick={() => setActiveNodeId(isActive ? null : node.id)}
+                    >
+                      {/* Top Date Badge */}
+                      <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-md bg-charcoal-900 border border-luxury-green-800/20 text-gray-300 mb-3 shadow-md">
+                        {node.formattedDate}
+                      </span>
+
+                      {/* Node Icon Circle */}
+                      <motion.div
+                        whileHover={{ scale: 1.15 }}
+                        whileTap={{ scale: 0.95 }}
+                        className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all shadow-lg ${
+                          isCompleted
+                            ? 'bg-emerald-950 border-emerald-500 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                            : isOverdue
+                            ? 'bg-rose-950 border-rose-500 text-rose-400 shadow-[0_0_12px_rgba(239,68,68,0.3)]'
+                            : 'bg-charcoal-900 border-gold-500/50 text-gold-400 hover:border-gold-400'
+                        }`}
+                        style={{ backgroundColor: isActive ? `${node.color}22` : undefined }}
+                      >
+                        {node.type === 'shoot' && <Clapperboard className="w-4 h-4" />}
+                        {node.type === 'calendar' && <CalendarIcon className="w-4 h-4" />}
+                        {node.type === 'milestone' && (isCompleted ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <CheckSquare className="w-4 h-4" />)}
+                        {node.type === 'revision' && <FileEdit className="w-4 h-4" />}
+                        {node.type === 'deadline' && (isCompleted ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <Clock className="w-4 h-4" />)}
+                      </motion.div>
+
+                      {/* Node Title & Type Pill */}
+                      <div className="mt-3 text-center max-w-[110px]">
+                        <span className="text-[10px] font-bold text-white block truncate leading-tight">
+                          {node.title}
+                        </span>
+                        <span className={`inline-block text-[8px] font-mono px-1.5 py-0.2 mt-1 rounded uppercase tracking-wider ${
+                          node.type === 'shoot' ? 'bg-emerald-500/15 text-emerald-400' :
+                          node.type === 'calendar' ? 'bg-blue-500/15 text-blue-400' :
+                          node.type === 'milestone' ? 'bg-amber-500/15 text-amber-400' :
+                          node.type === 'revision' ? 'bg-rose-500/15 text-rose-400' :
+                          'bg-purple-500/15 text-purple-400'
+                        }`}>
+                          {node.type}
+                        </span>
+                      </div>
+
+                      {/* Quick Interactive Check Box for Custom Milestones */}
+                      {node.isCustomMilestone && node.milestoneId && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleMilestone(node.milestoneId!);
+                          }}
+                          className={`mt-1.5 px-2 py-0.5 rounded-md text-[8px] font-mono font-bold border transition-colors cursor-pointer ${
+                            isCompleted
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                              : 'bg-gold-500/10 text-gold-400 border-gold-500/30 hover:bg-gold-500/20'
+                          }`}
+                        >
+                          {isCompleted ? '✓ Done' : 'Mark Done'}
+                        </button>
+                      )}
+
+                      {/* Expanded Active Node Popover Card */}
+                      {isActive && (
+                        <div className="absolute bottom-full mb-3 w-48 p-3 rounded-xl bg-charcoal-900 border border-gold-500/30 shadow-2xl z-30 text-left">
+                          <div className="flex justify-between items-start">
+                            <span className="text-[9px] font-mono font-bold text-gold-400 uppercase">{node.type}</span>
+                            <span className="text-[8px] font-mono text-gray-400">{node.date}</span>
+                          </div>
+                          <p className="text-xs font-bold text-white mt-1">{node.title}</p>
+                          {node.description && (
+                            <p className="text-[10px] text-gray-300 mt-1 leading-normal">{node.description}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Vertical Chronological Stream View */
+          <div className="relative z-10 space-y-3 pl-2">
+            {/* Vertical Connecting Line */}
+            <div className="absolute left-5 top-3 bottom-3 w-0.5 bg-luxury-green-800/30" />
+
+            {filteredNodes.map((node) => {
+              const isCompleted = node.status === 'completed';
+              const isOverdue = node.status === 'overdue';
+
+              return (
+                <div key={node.id} className="relative flex items-start space-x-3 group">
+                  {/* Left Node Dot */}
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center border shrink-0 z-10 mt-1 shadow-md ${
+                    isCompleted
+                      ? 'bg-emerald-950 border-emerald-500 text-emerald-400'
+                      : isOverdue
+                      ? 'bg-rose-950 border-rose-500 text-rose-400'
+                      : 'bg-charcoal-900 border-gold-500/50 text-gold-400'
+                  }`}>
+                    {node.type === 'shoot' && <Clapperboard className="w-3 h-3" />}
+                    {node.type === 'calendar' && <CalendarIcon className="w-3 h-3" />}
+                    {node.type === 'milestone' && (isCompleted ? <Check className="w-3 h-3 text-emerald-400" /> : <CheckSquare className="w-3 h-3" />)}
+                    {node.type === 'revision' && <FileEdit className="w-3 h-3" />}
+                    {node.type === 'deadline' && <Clock className="w-3 h-3" />}
+                  </div>
+
+                  {/* Node Content Box */}
+                  <div className="flex-1 p-3 bg-charcoal-950/70 hover:bg-charcoal-950 rounded-xl border border-luxury-green-800/15 flex items-center justify-between transition-all">
+                    <div className="pr-2">
+                      <div className="flex items-center space-x-2">
+                        <span className={`text-[8px] font-mono px-1.5 py-0.2 rounded font-bold uppercase ${
+                          node.type === 'shoot' ? 'bg-emerald-500/15 text-emerald-400' :
+                          node.type === 'calendar' ? 'bg-blue-500/15 text-blue-400' :
+                          node.type === 'milestone' ? 'bg-amber-500/15 text-amber-400' :
+                          node.type === 'revision' ? 'bg-rose-500/15 text-rose-400' :
+                          'bg-purple-500/15 text-purple-400'
+                        }`}>
+                          {node.type}
+                        </span>
+                        <span className="text-[9px] font-mono text-gray-400">{node.formattedDate}</span>
+                      </div>
+                      <h4 className={`text-xs font-semibold mt-1 ${isCompleted ? 'text-gray-300' : 'text-white'}`}>
+                        {node.title}
+                      </h4>
+                      {node.description && (
+                        <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">{node.description}</p>
+                      )}
+                    </div>
+
+                    {/* Interactive Action or Status */}
+                    <div className="shrink-0 flex items-center space-x-2">
+                      {node.isCustomMilestone && node.milestoneId ? (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleMilestone(node.milestoneId!)}
+                          className={`px-2.5 py-1 rounded-lg text-[9px] font-mono font-bold border transition-colors cursor-pointer ${
+                            isCompleted
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/30'
+                              : 'bg-gold-500/10 text-gold-400 border-gold-500/30 hover:bg-gold-500/20'
+                          }`}
+                        >
+                          {isCompleted ? '✓ Completed' : 'Pending'}
+                        </button>
+                      ) : (
+                        <span className={`text-[9px] font-mono px-2 py-0.5 rounded font-bold ${
+                          isCompleted ? 'text-emerald-400 bg-emerald-500/10' :
+                          isOverdue ? 'text-rose-400 bg-rose-500/10' : 'text-gold-400 bg-gold-500/10'
+                        }`}>
+                          {isCompleted ? 'Done' : (isOverdue ? 'Overdue' : 'Scheduled')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : (
+        <div className="py-6 text-center text-xs text-gray-500 font-mono relative z-10">
+          No timeline nodes match the selected filter.
+        </div>
+      )}
+
+      {/* Quick Add Timeline Milestone Input */}
+      <div className="pt-2 border-t border-luxury-green-800/15 relative z-10">
+        <div className="flex items-center bg-charcoal-950 rounded-xl border border-luxury-green-800/20 p-1 pl-3">
+          <input
+            type="text"
+            placeholder="Add new milestone to timeline..."
+            value={newMilestoneInput}
+            onChange={(e) => setNewMilestoneInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddMilestone();
+              }
+            }}
+            className="flex-1 bg-transparent border-0 outline-none text-xs text-gray-200 py-1 focus:ring-0"
+          />
+          <button
+            type="button"
+            onClick={handleAddMilestone}
+            className="px-3 py-1 bg-gold-500 hover:bg-gold-400 text-charcoal-950 text-xs font-bold rounded-lg cursor-pointer transition-colors shrink-0"
+          >
+            + Add Step
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ProjectsView = React.memo(function ProjectsView({
   projects,
   studios,
   editors,
   revisions,
+  calendarEvents = [],
   userRole,
   currentStudioId,
   onAddProject,
@@ -151,13 +650,154 @@ const ProjectsView = React.memo(function ProjectsView({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [studioFilter, setStudioFilter] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'deadline' | 'updated'>('deadline');
+  const [deadlineFilter, setDeadlineFilter] = useState<'all' | 'due_7_days'>('all');
+  const [sortBy, setSortBy] = useState<'active_first' | 'priority' | 'deadline' | 'name' | 'updated'>('active_first');
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+
+  // Quick Deadline Edit Modal State
+  const [editingDeadlineProjectId, setEditingDeadlineProjectId] = useState<string | null>(null);
+  const [quickDeadlineDate, setQuickDeadlineDate] = useState<string>('');
   
   // Selected project for details drawer
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [newDetailMilestone, setNewDetailMilestone] = useState('');
+
+  // Printable PDF Worksheet State
+  const [isWorksheetModalOpen, setIsWorksheetModalOpen] = useState(false);
+  const [worksheetProject, setWorksheetProject] = useState<Project | null>(null);
+
+  // Helper function to render a countdown badge for projects due within 7 days
+  const renderDeadlineCountdownBadge = (deliveryDateStr: string | undefined, projStatus: string) => {
+    if (!deliveryDateStr || ['delivered', 'closed'].includes(projStatus)) return null;
+
+    const daysLeft = Math.ceil((new Date(deliveryDateStr).getTime() - Date.now()) / (1000 * 3600 * 24));
+
+    if (daysLeft < 0) {
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[10px] font-black bg-gradient-to-r from-red-600 to-rose-700 text-white px-2.5 py-0.5 rounded-full border border-red-400/50 shadow-md animate-pulse">
+          <Flame className="w-3 h-3 text-yellow-300 fill-yellow-300 shrink-0" />
+          <span>OVERDUE BY {Math.abs(daysLeft)}D</span>
+        </span>
+      );
+    }
+
+    if (daysLeft === 0) {
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[10px] font-black bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 text-white px-2.5 py-0.5 rounded-full border border-gold-400/60 shadow-lg animate-bounce">
+          <Flame className="w-3 h-3 text-yellow-200 fill-yellow-200 shrink-0" />
+          <span>DUE TODAY!</span>
+        </span>
+      );
+    }
+
+    if (daysLeft <= 3) {
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[10px] font-black bg-gradient-to-r from-gold-500 via-amber-500 to-orange-500 text-charcoal-950 px-2.5 py-0.5 rounded-full border border-gold-300 shadow-md animate-pulse">
+          <Zap className="w-3 h-3 text-charcoal-950 fill-charcoal-950 shrink-0" />
+          <span>{daysLeft} DAYS LEFT</span>
+        </span>
+      );
+    }
+
+    if (daysLeft <= 7) {
+      return (
+        <span className="inline-flex items-center gap-1 font-mono text-[10px] font-bold bg-charcoal-950 text-gold-400 border border-gold-500/50 px-2.5 py-0.5 rounded-full shadow-sm">
+          <Clock className="w-3 h-3 text-gold-400 shrink-0" />
+          <span>{daysLeft} DAYS LEFT</span>
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold text-gray-400">
+        <Clock className="w-3 h-3 text-gray-500 shrink-0" />
+        <span>{daysLeft}d left</span>
+      </span>
+    );
+  };
+
+  // Helper function to render a distinct, color-coded status pill for a project
+  const renderStatusPill = (status: ProjectStatus, size: 'sm' | 'md' = 'md') => {
+    const stage = WORKFLOW_STAGES.find(s => s.id === status);
+    
+    // Distinct visual configurations for each workflow status
+    const statusConfig: Record<ProjectStatus, { bg: string; text: string; border: string; dot: string; label: string }> = {
+      data_received: {
+        bg: 'bg-sky-500/20 backdrop-blur-md shadow-sky-500/10',
+        text: 'text-sky-300 font-bold',
+        border: 'border-sky-400/40',
+        dot: 'bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.8)]',
+        label: 'Data Received'
+      },
+      assigned: {
+        bg: 'bg-indigo-500/20 backdrop-blur-md shadow-indigo-500/10',
+        text: 'text-indigo-300 font-bold',
+        border: 'border-indigo-400/40',
+        dot: 'bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.8)]',
+        label: 'Assigned'
+      },
+      editing: {
+        bg: 'bg-gradient-to-r from-amber-500/25 via-orange-500/20 to-amber-500/25 backdrop-blur-md shadow-amber-500/15',
+        text: 'text-amber-300 font-extrabold',
+        border: 'border-amber-400/50',
+        dot: 'bg-amber-400 animate-pulse shadow-[0_0_10px_rgba(251,191,36,0.9)]',
+        label: 'Editing Active'
+      },
+      review: {
+        bg: 'bg-purple-500/20 backdrop-blur-md shadow-purple-500/10',
+        text: 'text-purple-300 font-bold',
+        border: 'border-purple-400/40',
+        dot: 'bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.8)]',
+        label: 'In Review'
+      },
+      revision: {
+        bg: 'bg-gradient-to-r from-rose-500/25 to-pink-500/20 backdrop-blur-md shadow-rose-500/15',
+        text: 'text-rose-300 font-extrabold',
+        border: 'border-rose-400/50',
+        dot: 'bg-rose-400 animate-bounce shadow-[0_0_10px_rgba(251,113,133,0.9)]',
+        label: 'Revisions'
+      },
+      rendering: {
+        bg: 'bg-teal-500/20 backdrop-blur-md shadow-teal-500/10',
+        text: 'text-teal-300 font-bold',
+        border: 'border-teal-400/40',
+        dot: 'bg-teal-400 animate-pulse shadow-[0_0_8px_rgba(45,212,191,0.8)]',
+        label: 'Rendering'
+      },
+      delivered: {
+        bg: 'bg-gradient-to-r from-emerald-500/25 to-teal-500/20 backdrop-blur-md shadow-emerald-500/15',
+        text: 'text-emerald-300 font-extrabold',
+        border: 'border-emerald-400/50',
+        dot: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]',
+        label: 'Delivered'
+      },
+      closed: {
+        bg: 'bg-slate-800/90 backdrop-blur-md',
+        text: 'text-slate-300 font-medium',
+        border: 'border-slate-700',
+        dot: 'bg-slate-400',
+        label: 'Closed'
+      }
+    };
+
+    const cfg = statusConfig[status] || {
+      bg: 'bg-gray-800/80',
+      text: 'text-gray-300 font-semibold',
+      border: 'border-gray-700',
+      dot: 'bg-gray-400',
+      label: stage?.label || status
+    };
+
+    const isSmall = size === 'sm';
+
+    return (
+      <span className={`inline-flex items-center gap-1.5 font-mono ${isSmall ? 'text-[9px] px-2 py-0.5' : 'text-[10px] px-2.5 py-1'} rounded-full border shadow-sm ${cfg.bg} ${cfg.text} ${cfg.border}`}>
+        <span className={`rounded-full shrink-0 ${isSmall ? 'w-1.5 h-1.5' : 'w-2 h-2'} ${cfg.dot}`} />
+        <span className="whitespace-nowrap uppercase tracking-wider">{cfg.label}</span>
+      </span>
+    );
+  };
   
   // Create / Edit modal state
   const [isModalOpen, setIsModalOpen] = useState(initialTriggerAction === 'add_project');
@@ -259,6 +899,29 @@ const ProjectsView = React.memo(function ProjectsView({
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [confirmDeleteText, setConfirmDeleteText] = useState('');
   const [revisionToDeleteId, setRevisionToDeleteId] = useState<string | null>(null);
+
+  // Side-by-side Revision Comparison Modal state
+  const [comparingProject, setComparingProject] = useState<Project | null>(null);
+  const [compareRevAId, setCompareRevAId] = useState<string>('original');
+  const [compareRevBId, setCompareRevBId] = useState<string>('latest');
+  const [isAddingRevInModal, setIsAddingRevInModal] = useState<boolean>(false);
+  const [modalNewRevNotes, setModalNewRevNotes] = useState<string>('');
+  const [copiedComparison, setCopiedComparison] = useState<boolean>(false);
+
+  const openRevisionComparison = (proj: Project, defaultRevId?: string) => {
+    setComparingProject(proj);
+    const projRevs = (revisions || []).filter(r => r.projectId === proj.id);
+    if (projRevs.length === 0) {
+      setCompareRevAId('original');
+      setCompareRevBId('original');
+    } else if (projRevs.length === 1) {
+      setCompareRevAId('original');
+      setCompareRevBId(defaultRevId || projRevs[0].id);
+    } else {
+      setCompareRevAId('original');
+      setCompareRevBId(defaultRevId || projRevs[projRevs.length - 1].id);
+    }
+  };
 
   // Compute stats for header summary
   const summaryStats = useMemo(() => {
@@ -612,6 +1275,33 @@ const ProjectsView = React.memo(function ProjectsView({
     await onUpdateProject(proj.id, { status: newStatus });
   };
 
+  // Status category counts
+  const statusCategoryCounts = useMemo(() => {
+    const scope = projects.filter(p => studioFilter === 'all' || p.studioId === studioFilter);
+    return {
+      all: scope.length,
+      in_progress: scope.filter(p => !['delivered', 'closed'].includes(p.status)).length,
+      editing: scope.filter(p => p.status === 'editing').length,
+      finalized: scope.filter(p => ['review', 'revision', 'rendering'].includes(p.status)).length,
+      delivery: scope.filter(p => p.status === 'delivered').length,
+      completed: scope.filter(p => ['delivered', 'closed'].includes(p.status)).length,
+    };
+  }, [projects, studioFilter]);
+
+  // Projects due within 7 days (or overdue)
+  const projectsDueWithin7Days = useMemo(() => {
+    return projects.filter(p => {
+      if (!p.deliveryDate || ['delivered', 'closed'].includes(p.status)) return false;
+      const days = Math.ceil((new Date(p.deliveryDate).getTime() - Date.now()) / (1000 * 3600 * 24));
+      return days <= 7;
+    });
+  }, [projects]);
+
+  // Currently active/running projects (not delivered or closed)
+  const activeRunningProjects = useMemo(() => {
+    return projects.filter(p => !['delivered', 'closed'].includes(p.status) && (studioFilter === 'all' || p.studioId === studioFilter));
+  }, [projects, studioFilter]);
+
   // Filter and Sort project lists
   const filteredProjects = useMemo(() => {
     const filtered = projects.filter(p => {
@@ -619,21 +1309,85 @@ const ProjectsView = React.memo(function ProjectsView({
                             (p.studioName || '').toLowerCase().includes(debouncedSearchQuery.toLowerCase()) || 
                             (p.id || '').toLowerCase().includes(debouncedSearchQuery.toLowerCase());
       
-      const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
+      const matchesStatus = (() => {
+        if (statusFilter === 'all') return true;
+        if (statusFilter === 'in_progress') {
+          return !['delivered', 'closed'].includes(p.status);
+        }
+        if (statusFilter === 'editing') {
+          return p.status === 'editing';
+        }
+        if (statusFilter === 'finalized') {
+          return ['review', 'revision', 'rendering'].includes(p.status);
+        }
+        if (statusFilter === 'delivery' || statusFilter === 'delivered') {
+          return p.status === 'delivered';
+        }
+        if (statusFilter === 'completed') {
+          return ['delivered', 'closed'].includes(p.status);
+        }
+        return p.status === statusFilter;
+      })();
+
       const matchesPriority = priorityFilter === 'all' || p.priority === priorityFilter;
       const matchesStudio = studioFilter === 'all' || p.studioId === studioFilter;
+
+      const matchesDeadlineFilter = (() => {
+        if (deadlineFilter === 'all') return true;
+        if (!p.deliveryDate || ['delivered', 'closed'].includes(p.status)) return false;
+        const days = Math.ceil((new Date(p.deliveryDate).getTime() - Date.now()) / (1000 * 3600 * 24));
+        return days <= 7;
+      })();
       
-      return matchesSearch && matchesStatus && matchesPriority && matchesStudio;
+      return matchesSearch && matchesStatus && matchesPriority && matchesStudio && matchesDeadlineFilter;
     });
 
     return [...filtered].sort((a, b) => {
-      if (sortBy === 'deadline') {
-        // "Deadline: Near" -> ascending order of deliveryDate.
+      // Helper function: check if project is currently active/running (not closed or delivered)
+      const isRunningA = !['delivered', 'closed'].includes(a.status);
+      const isRunningB = !['delivered', 'closed'].includes(b.status);
+
+      if (sortBy === 'priority') {
+        // Active running projects float to top
+        if (isRunningA !== isRunningB) {
+          return isRunningB ? 1 : -1;
+        }
+        const prioWeight: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
+        const pA = prioWeight[a.priority || 'medium'] || 2;
+        const pB = prioWeight[b.priority || 'medium'] || 2;
+        if (pA !== pB) return pB - pA; // Urgent -> High -> Medium -> Low
+        const dateA = a.deliveryDate ? new Date(a.deliveryDate).getTime() : Infinity;
+        const dateB = b.deliveryDate ? new Date(b.deliveryDate).getTime() : Infinity;
+        return dateA - dateB;
+      } else if (sortBy === 'name') {
+        if (isRunningA !== isRunningB) {
+          return isRunningB ? 1 : -1;
+        }
+        const nameA = (a.projectName || a.coupleName || '').toLowerCase();
+        const nameB = (b.projectName || b.coupleName || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      } else if (sortBy === 'active_first') {
+        // Primary priority: Active running projects float to the top
+        if (isRunningA !== isRunningB) {
+          return isRunningB ? 1 : -1;
+        }
+        // Tie-breaker: Nearest delivery deadline first
+        const dateA = a.deliveryDate ? new Date(a.deliveryDate).getTime() : Infinity;
+        const dateB = b.deliveryDate ? new Date(b.deliveryDate).getTime() : Infinity;
+        return dateA - dateB;
+      } else if (sortBy === 'deadline') {
+        // Primary priority: Active running projects float to the top first
+        if (isRunningA !== isRunningB) {
+          return isRunningB ? 1 : -1;
+        }
         const dateA = a.deliveryDate ? new Date(a.deliveryDate).getTime() : Infinity;
         const dateB = b.deliveryDate ? new Date(b.deliveryDate).getTime() : Infinity;
         return dateA - dateB;
       } else {
-        // "Last Updated" -> descending order of updatedAt.
+        // "Last Updated" - Primary priority: Active running projects float to top
+        if (isRunningA !== isRunningB) {
+          return isRunningB ? 1 : -1;
+        }
         const getTimestamp = (val: any): number => {
           if (!val) return 0;
           if (typeof val.seconds === 'number') return val.seconds * 1000;
@@ -714,8 +1468,68 @@ const ProjectsView = React.memo(function ProjectsView({
         </div>
       </div>
       
-      {/* Search and Filters Hub */}
-      <div className="p-5 rounded-3xl bg-charcoal-900/60 border border-luxury-green-800/10 relative overflow-hidden backdrop-blur-sm">
+      {/* Persistent Search and Filters Hub */}
+      <div className="sticky top-2 z-30 p-5 rounded-3xl bg-charcoal-900/95 border border-luxury-green-800/30 relative overflow-hidden backdrop-blur-md shadow-2xl space-y-4 transition-all">
+        {/* Status Category Persistent Quick Filter Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3.5">
+          <div className="flex items-center space-x-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+            <span className="text-[10px] uppercase font-mono tracking-wider text-gold-400 font-bold hidden md:inline mr-1">Status:</span>
+            {[
+              { id: 'all', label: 'All', count: statusCategoryCounts.all },
+              { id: 'in_progress', label: 'In Progress', count: statusCategoryCounts.in_progress },
+              { id: 'editing', label: 'Editing', count: statusCategoryCounts.editing },
+              { id: 'finalized', label: 'Finalized', count: statusCategoryCounts.finalized },
+              { id: 'delivery', label: 'Delivery', count: statusCategoryCounts.delivery },
+              { id: 'completed', label: 'Completed', count: statusCategoryCounts.completed },
+            ].map((tab) => {
+              const isActive = statusFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  id={`filter-status-${tab.id}`}
+                  onClick={() => setStatusFilter(tab.id)}
+                  className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-2xl text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer relative ${
+                    isActive
+                      ? 'bg-gradient-to-r from-luxury-green-800 to-luxury-green-700 text-gold-300 border border-gold-400/50 font-bold shadow-md shadow-gold-500/10 scale-[1.02]'
+                      : 'bg-charcoal-950/80 border border-luxury-green-800/20 text-gray-400 hover:text-white hover:bg-charcoal-900'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                      isActive
+                        ? 'bg-gold-500/25 text-gold-300'
+                        : 'bg-charcoal-900 text-gray-500'
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Detailed Workflow Stage Select */}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="bg-charcoal-950 border border-luxury-green-800/20 px-3 py-1.5 rounded-2xl text-xs text-gray-300 focus:outline-none focus:border-gold-500/40 cursor-pointer shrink-0"
+          >
+            <option value="all">All Stages</option>
+            <option value="in_progress">All In Progress</option>
+            <option value="editing">Editing Only</option>
+            <option value="finalized">Finalized / Revisions</option>
+            <option value="delivery">Delivery Stage</option>
+            <option value="completed">All Completed</option>
+            <optgroup label="Specific Workflow Stage">
+              {WORKFLOW_STAGES.map(stage => (
+                <option key={stage.id} value={stage.id}>{stage.label}</option>
+              ))}
+            </optgroup>
+          </select>
+        </div>
+
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex-1 relative">
             <Search className="absolute left-4 top-3.5 w-4 h-4 text-gray-400" />
@@ -739,6 +1553,29 @@ const ProjectsView = React.memo(function ProjectsView({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {/* Due within 7 days filter toggle pill */}
+            <button
+              type="button"
+              id="filter-deadline-7days"
+              onClick={() => setDeadlineFilter(deadlineFilter === 'due_7_days' ? 'all' : 'due_7_days')}
+              className={`px-3.5 py-1.5 rounded-2xl text-xs font-bold tracking-wider transition-all duration-200 cursor-pointer flex items-center gap-1.5 border shadow-sm ${
+                deadlineFilter === 'due_7_days'
+                  ? 'bg-gradient-to-r from-amber-500 via-gold-500 to-amber-600 text-charcoal-950 border-gold-300 font-extrabold shadow-amber-500/20 scale-[1.02]'
+                  : 'bg-charcoal-950 border-gold-500/30 text-gold-400 hover:border-gold-400 hover:bg-charcoal-900'
+              }`}
+              title="Filter projects that have deadlines within 7 days or are overdue"
+            >
+              <Clock className={`w-3.5 h-3.5 ${deadlineFilter === 'due_7_days' ? 'text-charcoal-950 fill-charcoal-950' : 'text-gold-400'}`} />
+              <span>Due within 7 Days</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
+                deadlineFilter === 'due_7_days'
+                  ? 'bg-charcoal-950/30 text-charcoal-950'
+                  : 'bg-gold-500/20 text-gold-300 border border-gold-500/30'
+              }`}>
+                {projectsDueWithin7Days.length}
+              </span>
+            </button>
+
             {/* View selectors */}
             <div className="flex bg-charcoal-950 border border-luxury-green-800/20 p-1 rounded-2xl">
               <button
@@ -767,40 +1604,65 @@ const ProjectsView = React.memo(function ProjectsView({
               </button>
             </div>
 
-            {/* Sort Toggle (Deadline: Near / Last Updated) */}
-            <div className="flex bg-charcoal-950 border border-luxury-green-800/20 p-1 rounded-2xl items-center">
+            {/* Sort Toggle (Priority / Due Date / Name / Running First / Last Updated) */}
+            <div className="flex bg-charcoal-950 border border-luxury-green-800/20 p-1 rounded-2xl items-center flex-wrap gap-0.5">
               <span className="text-[10px] uppercase font-mono text-gray-500 px-2 select-none hidden sm:inline">Sort:</span>
+              
+              <button
+                type="button"
+                id="sort-priority"
+                onClick={() => setSortBy('priority')}
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-semibold tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${sortBy === 'priority' ? 'bg-luxury-green-800 text-gold-400 font-bold shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+                title="Sort by Priority (Urgent → High → Medium → Low)"
+              >
+                <Flame className="w-3 h-3 text-amber-400" />
+                <span>Priority</span>
+              </button>
+
               <button
                 type="button"
                 id="sort-deadline"
                 onClick={() => setSortBy('deadline')}
-                className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold tracking-wider transition-all cursor-pointer ${sortBy === 'deadline' ? 'bg-luxury-green-800 text-gold-400 font-bold shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
-                title="Sort by Nearest Deadline"
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-semibold tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${sortBy === 'deadline' ? 'bg-luxury-green-800 text-gold-400 font-bold shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+                title="Sort by Nearest Due Date"
               >
-                Deadline
+                <Calendar className="w-3 h-3 text-sky-400" />
+                <span>Due Date</span>
               </button>
+
+              <button
+                type="button"
+                id="sort-name"
+                onClick={() => setSortBy('name')}
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-semibold tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${sortBy === 'name' ? 'bg-luxury-green-800 text-gold-400 font-bold shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+                title="Sort Alphabetically by Project or Couple Name"
+              >
+                <ArrowUpDown className="w-3 h-3 text-emerald-400" />
+                <span>Name</span>
+              </button>
+
+              <button
+                type="button"
+                id="sort-active-first"
+                onClick={() => setSortBy('active_first')}
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-semibold tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${sortBy === 'active_first' ? 'bg-luxury-green-800 text-gold-400 font-bold shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+                title="Put Running / Active Working Projects First"
+              >
+                <Zap className="w-3 h-3 text-gold-400" />
+                <span className="hidden md:inline">Running First</span>
+              </button>
+
               <button
                 type="button"
                 id="sort-updated"
                 onClick={() => setSortBy('updated')}
-                className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold tracking-wider transition-all cursor-pointer ${sortBy === 'updated' ? 'bg-luxury-green-800 text-gold-400 font-bold shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
-                title="Sort by Last Updated"
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-semibold tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${sortBy === 'updated' ? 'bg-luxury-green-800 text-gold-400 font-bold shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+                title="Sort by Last Updated Timestamp"
               >
-                Last Updated
+                <Clock className="w-3 h-3 text-purple-400" />
+                <span className="hidden sm:inline">Updated</span>
               </button>
             </div>
-
-            {/* Status Select */}
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-charcoal-950 border border-luxury-green-800/20 px-3.5 py-2.5 rounded-2xl text-xs text-gray-300 focus:outline-none focus:border-gold-500/40 cursor-pointer"
-            >
-              <option value="all">All Stages</option>
-              {WORKFLOW_STAGES.map(stage => (
-                <option key={stage.id} value={stage.id}>{stage.label}</option>
-              ))}
-            </select>
 
             {(userRole === 'admin' || userRole === 'editor' || userRole === 'studio') && (
               <button
@@ -856,6 +1718,81 @@ const ProjectsView = React.memo(function ProjectsView({
         </div>
       )}
 
+      {/* Active Running Projects Highlight Section */}
+      {activeRunningProjects.length > 0 && statusFilter === 'all' && (
+        <div className="bg-gradient-to-br from-charcoal-900 via-charcoal-900 to-luxury-green-950/60 border border-gold-500/30 rounded-3xl p-4 sm:p-5 shadow-2xl relative overflow-hidden space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-3">
+            <div className="flex items-center gap-2.5">
+              <span className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
+              <h3 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2 tracking-wide font-display">
+                <Zap className="w-4 h-4 text-gold-400 fill-gold-400" />
+                <span>CHALU / WORKING PROJECTS ({activeRunningProjects.length})</span>
+              </h3>
+              <span className="text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold">
+                Currently Running
+              </span>
+            </div>
+
+            <div className="text-xs text-gray-400 flex items-center gap-2">
+              <span className="hidden md:inline text-gold-300/80 font-medium">⚡ Active projects are listed first at the top</span>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('in_progress')}
+                className="text-gold-400 hover:text-gold-300 font-bold text-xs underline cursor-pointer"
+              >
+                View All In-Progress ({activeRunningProjects.length}) →
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Cards Grid for Running Projects */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {activeRunningProjects.slice(0, 8).map((proj) => {
+              const stage = WORKFLOW_STAGES.find(s => s.id === proj.status);
+              const editor = editors.find(e => e.id === proj.assignedEditorId);
+              const remainingDays = proj.deliveryDate ? Math.ceil((new Date(proj.deliveryDate).getTime() - Date.now()) / (1000 * 3600 * 24)) : null;
+
+              return (
+                <div
+                  key={proj.id}
+                  onClick={() => { setSelectedProject(proj); setIsDetailOpen(true); }}
+                  className="p-3 bg-charcoal-950/90 border border-gold-500/20 hover:border-gold-400/60 rounded-2xl transition-all cursor-pointer group hover:bg-charcoal-900 relative overflow-hidden shadow-md flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-[9px] font-mono font-bold text-gold-400/90 block truncate">{proj.id} • {proj.studioName || 'Studio'}</span>
+                        <h4 className="text-xs font-black text-white group-hover:text-gold-300 transition-colors truncate">
+                          {proj.projectName || proj.coupleName}
+                        </h4>
+                      </div>
+                      <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase shrink-0 ${stage?.bg || 'bg-blue-500/20'} ${stage?.color || 'text-blue-400'}`}>
+                        {stage?.label || proj.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-gray-400 pt-2 border-t border-white/10 mt-1">
+                    <span className="truncate flex items-center gap-1 font-medium text-gray-300">
+                      <User className="w-3 h-3 text-gold-400 shrink-0" />
+                      {editor ? editor.name : (proj.assignedEditorName || 'Unassigned')}
+                    </span>
+                    {remainingDays !== null && (
+                      <span className={`font-mono font-extrabold ${remainingDays < 0 ? 'text-red-400' : remainingDays <= 3 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        {remainingDays < 0 ? `${Math.abs(remainingDays)}d overdue` : `${remainingDays}d left`}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Grid View Content */}
       {viewMode === 'grid' && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
@@ -882,7 +1819,7 @@ const ProjectsView = React.memo(function ProjectsView({
                 onTap={() => {
                   setExpandedProjectId(expandedProjectId === proj.id ? null : proj.id);
                 }}
-                className={`rounded-3xl bg-gradient-to-b from-charcoal-900 to-charcoal-950 border border-luxury-green-800/10 relative overflow-hidden flex flex-col ${expandedProjectId === proj.id ? 'min-h-[410px] h-auto pb-4' : 'h-[410px]'} justify-between cursor-pointer group hover:border-gold-500/20 shadow-lg hover:shadow-xl transition-all duration-300`}
+                className={`rounded-3xl bg-gradient-to-b from-charcoal-900 to-charcoal-950 border relative overflow-hidden flex flex-col ${expandedProjectId === proj.id ? 'min-h-[460px] h-auto pb-4' : 'min-h-[440px] h-auto'} justify-between cursor-pointer group shadow-lg hover:shadow-2xl transition-all duration-300 ${currentPriority?.glowBorder || 'border-luxury-green-800/20'}`}
               >
                 {/* Photo Top Header */}
                 <div className="h-44 relative overflow-hidden shrink-0">
@@ -899,23 +1836,41 @@ const ProjectsView = React.memo(function ProjectsView({
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-charcoal-900 via-charcoal-900/40 to-transparent" />
                   
-                  {/* Floating ID & Priority */}
-                  <div className="absolute top-4 left-4 flex space-x-2">
-                    <span className="text-[10px] font-mono px-2.5 py-1 bg-charcoal-950/80 border border-luxury-green-800/30 text-gold-400 rounded-md">
+                  {/* Floating ID & Priority Label with Admin Selector */}
+                  <div className="absolute top-4 left-4 flex items-center space-x-2 z-10" onClick={(e) => e.stopPropagation()}>
+                    <span className="text-[10px] font-mono px-2.5 py-1 bg-charcoal-950/90 border border-luxury-green-800/40 text-gold-400 rounded-lg shadow">
                       {proj.id}
                     </span>
-                    {currentPriority && (
-                      <span className={`text-[10px] font-mono px-2.5 py-1 bg-charcoal-950/80 rounded-md border border-luxury-green-800/20 ${currentPriority.color}`}>
-                        {currentPriority.label}
-                      </span>
-                    )}
+
+                    {/* Interactive Priority Selector Badge */}
+                    <div className="relative group/priority">
+                      <select
+                        value={proj.priority || 'medium'}
+                        onChange={async (e) => {
+                          e.stopPropagation();
+                          const newPriority = e.target.value as ProjectPriority;
+                          await onUpdateProject(proj.id, { priority: newPriority });
+                        }}
+                        disabled={userRole !== 'admin'}
+                        className={`text-[10px] font-mono px-2.5 py-1 rounded-lg border appearance-none pr-5 cursor-pointer backdrop-blur-md shadow-md font-bold transition-all ${currentPriority?.bg || 'bg-sky-500/20 border-sky-400/40'} ${currentPriority?.color || 'text-sky-300'} focus:outline-none focus:ring-1 focus:ring-gold-400`}
+                        title={userRole === 'admin' ? "Admin: Click to set Priority & update Card Glow" : "Project Priority Level"}
+                      >
+                        {PRIORITIES.map(p => (
+                          <option key={p.id} value={p.id} className="bg-charcoal-950 text-white font-mono">
+                            {p.icon} {p.label} Priority
+                          </option>
+                        ))}
+                      </select>
+                      {userRole === 'admin' && (
+                        <ChevronDown className="w-2.5 h-2.5 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-current opacity-80" />
+                      )}
+                    </div>
                   </div>
 
-                  {/* Status Overlay */}
-                  <div className="absolute bottom-4 left-4 flex items-center space-x-2">
-                    <span className={`text-[10px] font-mono px-2.5 py-1 rounded-md ${currentStage?.bg} ${currentStage?.color}`}>
-                      {currentStage?.label}
-                    </span>
+                  {/* Status Overlay & Deadline Countdown Badge */}
+                  <div className="absolute bottom-4 left-4 flex items-center gap-2 flex-wrap max-w-[80%]">
+                    {renderStatusPill(proj.status, 'md')}
+                    {renderDeadlineCountdownBadge(proj.deliveryDate, proj.status)}
                   </div>
 
                   {/* Circle progress ring on top-right */}
@@ -949,14 +1904,29 @@ const ProjectsView = React.memo(function ProjectsView({
                   <div>
                     <div className="flex justify-between items-start gap-2">
                       <div className="truncate flex-1">
-                        <h3 className="text-base font-bold text-white font-display leading-tight truncate group-hover:text-gold-400 transition-colors">
-                          {proj.projectName || proj.coupleName}
-                        </h3>
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <h3 className="text-base font-bold text-white font-display leading-tight truncate group-hover:text-gold-400 transition-colors">
+                            {proj.projectName || proj.coupleName}
+                          </h3>
+                          {renderStatusPill(proj.status, 'sm')}
+                        </div>
                         {proj.projectName && (
-                          <p className="text-[10px] text-gold-400/80 font-mono tracking-wider uppercase mt-0.5">{proj.coupleName}</p>
+                          <p className="text-[10px] text-gold-400/80 font-mono tracking-wider uppercase">{proj.coupleName}</p>
                         )}
                       </div>
                       <div className="flex items-center space-x-1 shrink-0" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setWorksheetProject(proj);
+                            setIsWorksheetModalOpen(true);
+                          }}
+                          className="p-1.5 bg-charcoal-950 hover:bg-gold-500/20 rounded-lg text-gold-400 hover:text-gold-300 border border-gold-500/20 transition-colors cursor-pointer"
+                          title="Print to PDF / Branded Worksheet"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1008,6 +1978,48 @@ const ProjectsView = React.memo(function ProjectsView({
                         </div>
                       </div>
                     </div>
+
+                    {/* Visual Revision Completion Progress Bar */}
+                    {(() => {
+                      const projRevisions = (revisions || []).filter(r => r.projectId === proj.id);
+                      const totalRev = projRevisions.length;
+                      const resolvedRev = projRevisions.filter(r => r.status === 'resolved').length;
+                      const revPercent = totalRev > 0 ? Math.round((resolvedRev / totalRev) * 100) : 100;
+
+                      return (
+                        <div className="mt-3.5 pt-3 border-t border-luxury-green-800/15">
+                          <div className="flex items-center justify-between text-[10px] font-mono mb-1.5">
+                            <span className="text-gray-400 font-medium flex items-center space-x-1">
+                              <FileEdit className="w-3 h-3 text-gold-400" />
+                              <span>Revision Progress</span>
+                            </span>
+                            <span className={`font-bold ${
+                              totalRev === 0 
+                                ? 'text-gray-400' 
+                                : revPercent === 100 
+                                ? 'text-emerald-400' 
+                                : 'text-amber-400'
+                            }`}>
+                              {totalRev > 0 
+                                ? `${resolvedRev}/${totalRev} Resolved (${revPercent}%)` 
+                                : '0 Revisions (100% Clear)'}
+                            </span>
+                          </div>
+                          <div className="w-full bg-charcoal-950 h-1.5 rounded-full overflow-hidden border border-white/5">
+                            <div
+                              className={`h-full transition-all duration-500 rounded-full ${
+                                totalRev === 0
+                                  ? 'bg-emerald-500/30'
+                                  : revPercent === 100
+                                  ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.4)]'
+                                  : 'bg-gradient-to-r from-amber-500 via-gold-400 to-emerald-400'
+                              }`}
+                              style={{ width: `${revPercent}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Collapsible details container */}
                     <AnimatePresence>
@@ -1115,25 +2127,25 @@ const ProjectsView = React.memo(function ProjectsView({
                     </AnimatePresence>
                   </div>
 
-                  {/* Card Bottom / Countdown */}
-                  <div className="border-t border-luxury-green-800/10 pt-4 mt-4 flex items-center justify-between text-[11px] text-gray-400 font-mono shrink-0">
-                    <div className="flex items-center space-x-1.5">
-                      <CalendarIcon className="w-3.5 h-3.5 text-luxury-green-500" />
-                      <span>{proj.deliveryDate}</span>
-                    </div>
+                  {/* Card Bottom / Countdown & Quick Edit */}
+                  <div className="border-t border-luxury-green-800/10 pt-3 mt-4 flex items-center justify-between text-[11px] font-mono shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingDeadlineProjectId(proj.id);
+                        setQuickDeadlineDate(proj.deliveryDate || '');
+                      }}
+                      className="flex items-center space-x-1.5 text-gray-300 hover:text-gold-400 transition-colors bg-charcoal-950/80 px-2.5 py-1 rounded-xl border border-white/5 hover:border-gold-500/30 cursor-pointer group/btn"
+                      title="Click to assign or change project deadline"
+                    >
+                      <CalendarIcon className="w-3.5 h-3.5 text-gold-400" />
+                      <span>{proj.deliveryDate || 'Assign Deadline'}</span>
+                      <Edit className="w-3 h-3 text-gray-500 group-hover/btn:text-gold-400" />
+                    </button>
 
                     <div>
-                      {remainingDays !== null ? (
-                        remainingDays < 0 ? (
-                          <span className="text-red-400 font-bold">Overdue</span>
-                        ) : remainingDays === 0 ? (
-                          <span className="text-yellow-500 font-bold">Due Today</span>
-                        ) : (
-                          <span>{remainingDays} days left</span>
-                        )
-                      ) : (
-                        <span className="text-gray-500">No Due Date</span>
-                      )}
+                      {renderDeadlineCountdownBadge(proj.deliveryDate, proj.status)}
                     </div>
                   </div>
                 </div>
@@ -1200,7 +2212,24 @@ const ProjectsView = React.memo(function ProjectsView({
                         </div>
                       </td>
                       <td className="p-4 text-xs font-semibold text-gray-300">{proj.studioName}</td>
-                      <td className="p-4 font-mono text-xs text-gray-400">{proj.deliveryDate}</td>
+                      <td className="p-4 font-mono text-xs text-gray-300">
+                        <div className="flex items-center gap-2">
+                          <span>{proj.deliveryDate || 'N/A'}</span>
+                          {renderDeadlineCountdownBadge(proj.deliveryDate, proj.status)}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingDeadlineProjectId(proj.id);
+                              setQuickDeadlineDate(proj.deliveryDate || '');
+                            }}
+                            className="p-1 hover:bg-gold-500/10 rounded text-gray-500 hover:text-gold-400 transition-colors cursor-pointer"
+                            title="Edit Deadline"
+                          >
+                            <Edit className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </td>
                       <td className="p-4 text-xs text-gray-300">
                         {proj.isSplitProject ? (
                           <div className="space-y-0.5">
@@ -1212,10 +2241,40 @@ const ProjectsView = React.memo(function ProjectsView({
                         )}
                       </td>
                       <td className="p-4">
-                        <div className="flex flex-col space-y-1">
-                          <span className={`inline-block text-[10px] font-mono px-2 py-0.5 rounded-md w-fit ${currentStage?.bg} ${currentStage?.color}`}>
-                            {currentStage?.label}
-                          </span>
+                        <div className="flex flex-col space-y-1.5 items-start">
+                          {renderStatusPill(proj.status, 'sm')}
+                          {(() => {
+                            const projRevisions = (revisions || []).filter(r => r.projectId === proj.id);
+                            const totalRev = projRevisions.length;
+                            const resolvedRev = projRevisions.filter(r => r.status === 'resolved').length;
+                            const revPct = totalRev > 0 ? Math.round((resolvedRev / totalRev) * 100) : 100;
+
+                            return (
+                              <div className="w-28 mt-0.5">
+                                <div className="flex items-center justify-between text-[8px] font-mono text-gray-400 mb-0.5">
+                                  <span className="flex items-center space-x-0.5">
+                                    <FileEdit className="w-2.5 h-2.5 text-gold-400" />
+                                    <span>Revisions</span>
+                                  </span>
+                                  <span className={totalRev === 0 ? 'text-gray-400' : revPct === 100 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                                    {totalRev > 0 ? `${resolvedRev}/${totalRev}` : '0 Logged'}
+                                  </span>
+                                </div>
+                                <div className="w-full bg-charcoal-900 h-1 rounded-full overflow-hidden border border-white/5">
+                                  <div
+                                    className={`h-full transition-all duration-300 rounded-full ${
+                                      totalRev === 0 
+                                        ? 'bg-emerald-500/30' 
+                                        : revPct === 100 
+                                        ? 'bg-emerald-400' 
+                                        : 'bg-amber-400'
+                                    }`}
+                                    style={{ width: `${revPct}%` }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })()}
                           {proj.customMilestones && proj.customMilestones.length > 0 && (
                             <span className="text-[9px] text-gray-500 font-mono">
                               🏁 {proj.customMilestones.filter(m => m.completed).length}/{proj.customMilestones.length} Milestones
@@ -1230,6 +2289,18 @@ const ProjectsView = React.memo(function ProjectsView({
                       </td>
                       <td className="p-4 pr-6 text-right" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end space-x-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setWorksheetProject(proj);
+                              setIsWorksheetModalOpen(true);
+                            }}
+                            className="p-1.5 hover:bg-gold-500/20 rounded-lg text-gold-400 hover:text-gold-300 border border-gold-500/20 transition-colors cursor-pointer"
+                            title="Print to PDF / Branded Worksheet"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </button>
                           <button
                             onClick={(e) => openEditModal(proj, e)}
                             className="p-1.5 hover:bg-luxury-green-800/30 rounded-lg text-gray-400 hover:text-gold-500 transition-colors cursor-pointer"
@@ -1284,30 +2355,33 @@ const ProjectsView = React.memo(function ProjectsView({
                   </div>
 
                   <div className="space-y-3 overflow-y-auto max-h-[460px] pr-1 custom-scrollbar">
-                    {stageProjects.map((proj) => (
-                      <SwipeableCard
-                        key={proj.id}
-                        id={proj.id}
-                        onSwipeLeft={(userRole === 'admin' || userRole === 'editor') ? () => handleDelete(proj.id, { stopPropagation: () => {} } as any) : undefined}
-                        onSwipeRight={async () => {
-                          await onUpdateProject(proj.id, { status: 'closed' });
-                          alert(`Project ${proj.id} has been closed/archived successfully!`);
-                        }}
-                        onTap={() => {
-                          setExpandedProjectId(expandedProjectId === proj.id ? null : proj.id);
-                        }}
-                        className={`p-4 rounded-2xl bg-charcoal-800/80 border border-luxury-green-800/15 hover:border-gold-500/20 cursor-pointer transition-all duration-200 shadow-md group ${expandedProjectId === proj.id ? 'border-gold-500/30' : ''}`}
-                      >
-                        <div className="flex justify-between items-start">
-                          <span className="text-[9px] font-mono bg-charcoal-950 px-1.5 py-0.5 rounded text-gold-400">
-                            {proj.id}
-                          </span>
-                          <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded uppercase ${
-                            proj.priority === 'urgent' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-gray-900 text-gray-400'
-                          }`}>
-                            {proj.priority}
-                          </span>
-                        </div>
+                    {stageProjects.map((proj) => {
+                      const pObj = PRIORITIES.find(p => p.id === proj.priority) || PRIORITIES[1];
+                      return (
+                        <SwipeableCard
+                          key={proj.id}
+                          id={proj.id}
+                          onSwipeLeft={(userRole === 'admin' || userRole === 'editor') ? () => handleDelete(proj.id, { stopPropagation: () => {} } as any) : undefined}
+                          onSwipeRight={async () => {
+                            await onUpdateProject(proj.id, { status: 'closed' });
+                            alert(`Project ${proj.id} has been closed/archived successfully!`);
+                          }}
+                          onTap={() => {
+                            setExpandedProjectId(expandedProjectId === proj.id ? null : proj.id);
+                          }}
+                          className={`p-4 rounded-2xl bg-charcoal-800/80 border cursor-pointer transition-all duration-200 shadow-md group ${pObj.glowBorder}`}
+                        >
+                          <div className="flex justify-between items-center gap-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[9px] font-mono bg-charcoal-950 px-1.5 py-0.5 rounded text-gold-400">
+                                {proj.id}
+                              </span>
+                              {renderStatusPill(proj.status, 'sm')}
+                            </div>
+                            <span className={`text-[8px] font-mono px-2 py-0.5 rounded-md uppercase font-bold shrink-0 border ${pObj.bg} ${pObj.color}`}>
+                              {pObj.icon} {pObj.label}
+                            </span>
+                          </div>
 
                         <div className="flex justify-between items-start gap-1 mt-2">
                           <div className="truncate flex-1">
@@ -1448,12 +2522,27 @@ const ProjectsView = React.memo(function ProjectsView({
                           )}
                         </AnimatePresence>
 
-                        <div className="flex justify-between items-center mt-4 pt-3 border-t border-luxury-green-800/5 text-[9px] text-gray-500 font-mono">
-                          <span>Lead: {proj.assignedEditorName || 'Unassigned'}</span>
-                          <span>{proj.deliveryDate}</span>
+                        <div className="flex justify-between items-center mt-4 pt-3 border-t border-luxury-green-800/10 text-[9px] text-gray-400 font-mono">
+                          <span className="truncate max-w-[100px]">Lead: {proj.assignedEditorName || 'Unassigned'}</span>
+                          <div className="flex items-center gap-1.5">
+                            {renderDeadlineCountdownBadge(proj.deliveryDate, proj.status)}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingDeadlineProjectId(proj.id);
+                                setQuickDeadlineDate(proj.deliveryDate || '');
+                              }}
+                              className="p-1 hover:bg-gold-500/10 rounded text-gray-400 hover:text-gold-400 transition-colors cursor-pointer"
+                              title="Edit Deadline"
+                            >
+                              <Edit className="w-3 h-3" />
+                            </button>
+                          </div>
                         </div>
                       </SwipeableCard>
-                    ))}
+                    );
+                  })}
 
                     {stageProjects.length === 0 && (
                       <div className="text-center py-10 text-[10px] text-gray-600 font-mono border border-dashed border-luxury-green-800/10 rounded-2xl">
@@ -1498,12 +2587,26 @@ const ProjectsView = React.memo(function ProjectsView({
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-charcoal-900 via-charcoal-900/20 to-transparent" />
                   
-                  <button
-                    onClick={() => setIsDetailOpen(false)}
-                    className="absolute top-4 left-4 bg-charcoal-950/70 hover:bg-charcoal-950 p-2.5 rounded-xl text-gray-300 hover:text-white border border-gold-500/15 backdrop-blur-md cursor-pointer text-xs"
-                  >
-                    ✕ Close Panel
-                  </button>
+                  <div className="absolute top-4 left-4 flex items-center space-x-2 z-10">
+                    <button
+                      onClick={() => setIsDetailOpen(false)}
+                      className="bg-charcoal-950/80 hover:bg-charcoal-950 px-3 py-2 rounded-xl text-gray-300 hover:text-white border border-gold-500/20 backdrop-blur-md cursor-pointer text-xs"
+                    >
+                      ✕ Close Panel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWorksheetProject(selectedProject);
+                        setIsWorksheetModalOpen(true);
+                      }}
+                      className="bg-gold-500 hover:bg-gold-400 text-charcoal-950 px-3.5 py-2 rounded-xl backdrop-blur-md cursor-pointer text-xs font-bold font-mono flex items-center space-x-1.5 transition-all shadow-md"
+                      title="Print formatted, branded PDF worksheet"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-charcoal-950" />
+                      <span>Print to PDF</span>
+                    </button>
+                  </div>
 
                   <div className="absolute bottom-4 left-6">
                     <span className="text-[10px] font-mono px-2 py-0.5 bg-gold-500/20 text-gold-400 border border-gold-500/30 rounded-md font-bold uppercase">
@@ -1523,9 +2626,9 @@ const ProjectsView = React.memo(function ProjectsView({
                   {/* Status update controller */}
                   <div className="p-4 rounded-2xl bg-charcoal-950 border border-luxury-green-800/25 flex flex-col md:flex-row md:items-center justify-between gap-3">
                     <div>
-                      <span className="text-[10px] text-gray-500 uppercase tracking-wider font-mono block">Current Workflow Stage</span>
-                      <div className="text-sm font-bold text-gold-400 capitalize mt-0.5">
-                        {WORKFLOW_STAGES.find(s => s.id === selectedProject.status)?.label}
+                      <span className="text-[10px] text-gray-500 uppercase tracking-wider font-mono block mb-1">Current Workflow Stage</span>
+                      <div className="flex items-center gap-2">
+                        {renderStatusPill(selectedProject.status, 'md')}
                       </div>
                     </div>
                     
@@ -1544,6 +2647,70 @@ const ProjectsView = React.memo(function ProjectsView({
                       ))}
                     </select>
                   </div>
+
+                  {/* Delivery Deadline & Countdown Interactive Section */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-charcoal-950 to-charcoal-900 border border-gold-500/30 space-y-3 shadow-lg">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-gold-400" />
+                        <span className="text-xs font-bold text-white uppercase tracking-wider font-display">Delivery Deadline & Countdown</span>
+                      </div>
+                      {renderDeadlineCountdownBadge(selectedProject.deliveryDate, selectedProject.status)}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-white/10">
+                      <div>
+                        <label className="block text-[9px] font-mono text-gray-400 uppercase mb-1">Assigned Deadline Date</label>
+                        <input
+                          type="date"
+                          value={selectedProject.deliveryDate || ''}
+                          onChange={async (e) => {
+                            const newDate = e.target.value;
+                            await onUpdateProject(selectedProject.id, { deliveryDate: newDate });
+                            setSelectedProject({ ...selectedProject, deliveryDate: newDate });
+                          }}
+                          onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }}
+                          className="w-full bg-charcoal-900 border border-gold-500/30 rounded-xl px-3 py-1.5 text-xs text-gold-300 font-mono focus:outline-none focus:border-gold-400 cursor-pointer"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[9px] font-mono text-gray-400 uppercase mb-1">Quick Presets (from Shoot Date)</label>
+                        <div className="flex gap-1.5 flex-wrap">
+                          {[
+                            { label: '+7d', days: 7 },
+                            { label: '+15d', days: 15 },
+                            { label: '+30d', days: 30 },
+                            { label: '+45d', days: 45 },
+                          ].map(preset => (
+                            <button
+                              key={preset.days}
+                              type="button"
+                              onClick={async () => {
+                                const baseDate = selectedProject.shootDate || new Date().toISOString().split('T')[0];
+                                const target = new Date(new Date(baseDate).getTime() + preset.days * 24 * 3600 * 1000);
+                                const newDate = target.toISOString().split('T')[0];
+                                await onUpdateProject(selectedProject.id, { deliveryDate: newDate });
+                                setSelectedProject({ ...selectedProject, deliveryDate: newDate });
+                              }}
+                              className="px-2 py-1 bg-charcoal-900 hover:bg-gold-500/20 border border-gold-500/30 text-gold-400 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer"
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Project Milestone & Calendar Event Timeline */}
+                  <ProjectTimeline
+                    project={selectedProject}
+                    calendarEvents={calendarEvents}
+                    revisions={revisions}
+                    onUpdateProject={onUpdateProject}
+                    setSelectedProject={setSelectedProject}
+                  />
 
                   {/* Core Details Grid */}
                   <div className="grid grid-cols-2 gap-4">
@@ -1661,13 +2828,24 @@ const ProjectsView = React.memo(function ProjectsView({
                         <FileEdit className="w-3.5 h-3.5" />
                         <span>Revision Timelines</span>
                       </h3>
-                      <button
-                        onClick={() => setIsAddingRevision(!isAddingRevision)}
-                        className="text-[10px] font-mono text-gold-400 hover:underline flex items-center space-x-1 cursor-pointer"
-                      >
-                        <PlusCircle className="w-3.5 h-3.5 mr-1" />
-                        <span>Add Request</span>
-                      </button>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => openRevisionComparison(selectedProject)}
+                          className="px-2.5 py-1 rounded-lg bg-gold-500/15 hover:bg-gold-500/25 border border-gold-500/30 text-[10px] font-mono text-gold-300 hover:text-gold-200 flex items-center space-x-1 transition-all cursor-pointer shadow-sm"
+                          title="Open Side-by-Side Visual Diff Comparison Modal"
+                        >
+                          <GitCompare className="w-3.5 h-3.5 text-gold-400" />
+                          <span>Compare Diff</span>
+                        </button>
+                        <button
+                          onClick={() => setIsAddingRevision(!isAddingRevision)}
+                          className="text-[10px] font-mono text-gold-400 hover:underline flex items-center space-x-1 cursor-pointer"
+                        >
+                          <PlusCircle className="w-3.5 h-3.5 mr-1" />
+                          <span>Add Request</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* New Revision Panel */}
@@ -1712,6 +2890,14 @@ const ProjectsView = React.memo(function ProjectsView({
                             </div>
 
                             <div className="flex items-center space-x-2 shrink-0 ml-2">
+                              <button
+                                type="button"
+                                onClick={() => openRevisionComparison(selectedProject, rev.id)}
+                                className="p-1.5 bg-gold-500/10 hover:bg-gold-500/25 text-gold-400 rounded-lg transition-colors cursor-pointer"
+                                title="Compare this revision side-by-side"
+                              >
+                                <GitCompare className="w-3.5 h-3.5" />
+                              </button>
                               {rev.status === 'pending' ? (
                                 <button
                                   type="button"
@@ -1884,14 +3070,28 @@ const ProjectsView = React.memo(function ProjectsView({
                 </div>
 
                 {/* Footer Controls */}
-                <div className="p-6 border-t border-luxury-green-800/20 bg-charcoal-950/50 flex justify-between shrink-0">
-                  <button
-                    onClick={(e) => openEditModal(selectedProject, e)}
-                    className="flex items-center space-x-2 px-4.5 py-2.5 bg-luxury-green-800 hover:bg-luxury-green-700 text-gold-400 text-xs font-bold rounded-xl border border-gold-500/20 transition-all cursor-pointer"
-                  >
-                    <Edit className="w-4 h-4" />
-                    <span>Edit Specifications</span>
-                  </button>
+                <div className="p-6 border-t border-luxury-green-800/20 bg-charcoal-950/50 flex flex-wrap justify-between items-center gap-3 shrink-0">
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={(e) => openEditModal(selectedProject, e)}
+                      className="flex items-center space-x-2 px-4 py-2.5 bg-luxury-green-800 hover:bg-luxury-green-700 text-gold-400 text-xs font-bold rounded-xl border border-gold-500/20 transition-all cursor-pointer"
+                    >
+                      <Edit className="w-4 h-4" />
+                      <span>Edit Specifications</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWorksheetProject(selectedProject);
+                        setIsWorksheetModalOpen(true);
+                      }}
+                      className="flex items-center space-x-2 px-4 py-2.5 bg-gold-500 hover:bg-gold-400 text-charcoal-950 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md"
+                    >
+                      <Printer className="w-4 h-4 text-charcoal-950" />
+                      <span>Print to PDF Worksheet</span>
+                    </button>
+                  </div>
 
                   {(userRole === 'admin' || userRole === 'editor') && (
                     <button
@@ -2201,7 +3401,10 @@ const ProjectsView = React.memo(function ProjectsView({
                               />
                             </div>
                             <div>
-                              <label className="block text-[9px] font-mono text-gray-500 uppercase mb-1">Delivery Deadline <span className="text-red-500">*</span></label>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="block text-[9px] font-mono text-gray-500 uppercase">Delivery Deadline <span className="text-red-500">*</span></label>
+                                <span className="text-[9px] font-mono text-gold-400 font-bold">Presets:</span>
+                              </div>
                               <input 
                                 type="date" 
                                 value={deliveryDate} 
@@ -2209,6 +3412,28 @@ const ProjectsView = React.memo(function ProjectsView({
                                 onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }}
                                 className="w-full bg-charcoal-950 border border-luxury-green-800/30 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-gold-500/30 cursor-pointer" 
                               />
+                              <div className="flex gap-1.5 mt-2 flex-wrap">
+                                {[
+                                  { label: '+7d', days: 7 },
+                                  { label: '+15d', days: 15 },
+                                  { label: '+30d', days: 30 },
+                                  { label: '+45d', days: 45 },
+                                ].map(preset => (
+                                  <button
+                                    key={preset.days}
+                                    type="button"
+                                    onClick={() => {
+                                      const baseDate = shootDate || new Date().toISOString().split('T')[0];
+                                      const target = new Date(new Date(baseDate).getTime() + preset.days * 24 * 3600 * 1000);
+                                      setDeliveryDate(target.toISOString().split('T')[0]);
+                                      setModalValidationError('');
+                                    }}
+                                    className="px-2 py-1 bg-charcoal-950 hover:bg-gold-500/20 border border-luxury-green-800/30 hover:border-gold-500/40 text-gold-400 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer"
+                                  >
+                                    {preset.label}
+                                  </button>
+                                ))}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -2981,6 +4206,665 @@ const ProjectsView = React.memo(function ProjectsView({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Quick Deadline Assign/Edit Modal */}
+      <AnimatePresence>
+        {editingDeadlineProjectId && (() => {
+          const targetProject = projects.find(p => p.id === editingDeadlineProjectId);
+          if (!targetProject) return null;
+
+          return (
+            <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4">
+              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setEditingDeadlineProjectId(null)} />
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="relative bg-charcoal-900 border border-gold-500/30 rounded-3xl p-6 max-w-md w-full shadow-2xl z-10 text-left font-sans"
+              >
+                <div className="flex justify-between items-center pb-3 border-b border-white/10">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-gold-400" />
+                    <h3 className="text-base font-bold text-white font-display">Assign / Change Deadline</h3>
+                  </div>
+                  <button onClick={() => setEditingDeadlineProjectId(null)} className="p-1 text-gray-400 hover:text-white cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="my-4 space-y-4">
+                  <div className="bg-charcoal-950 p-3 rounded-2xl border border-white/5 space-y-1">
+                    <span className="text-[10px] font-mono text-gray-500 uppercase block">Selected Project</span>
+                    <p className="text-sm font-bold text-white font-display">
+                      {targetProject.projectName || targetProject.coupleName}
+                    </p>
+                    <p className="text-[10px] text-gold-400 font-mono">
+                      ID: {targetProject.id} • Studio: {targetProject.studioName}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-mono text-gray-400 uppercase mb-1.5">Delivery Deadline Date</label>
+                    <input
+                      type="date"
+                      value={quickDeadlineDate}
+                      onChange={(e) => setQuickDeadlineDate(e.target.value)}
+                      onClick={(e) => { try { e.currentTarget.showPicker(); } catch (err) {} }}
+                      className="w-full bg-charcoal-950 border border-gold-500/30 rounded-xl px-4 py-2.5 text-xs text-gold-300 font-mono focus:outline-none focus:border-gold-400 cursor-pointer"
+                    />
+                  </div>
+
+                  <div>
+                    <span className="block text-[10px] font-mono text-gray-400 uppercase mb-2">Quick Deadline Presets (from Shoot Date)</span>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[
+                        { label: '+7 Days', days: 7 },
+                        { label: '+15 Days', days: 15 },
+                        { label: '+30 Days', days: 30 },
+                        { label: '+45 Days', days: 45 },
+                      ].map(preset => (
+                        <button
+                          key={preset.days}
+                          type="button"
+                          onClick={() => {
+                            const baseDate = targetProject.shootDate || new Date().toISOString().split('T')[0];
+                            const target = new Date(new Date(baseDate).getTime() + preset.days * 24 * 3600 * 1000);
+                            setQuickDeadlineDate(target.toISOString().split('T')[0]);
+                          }}
+                          className="px-2 py-2 bg-charcoal-950 hover:bg-gold-500/20 border border-gold-500/20 text-gold-300 rounded-xl text-[10px] font-bold font-mono transition-all cursor-pointer text-center"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setEditingDeadlineProjectId(null)}
+                    className="px-4 py-2 text-xs text-gray-400 hover:text-white cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!quickDeadlineDate) {
+                        alert('Please select a valid deadline date.');
+                        return;
+                      }
+                      await onUpdateProject(targetProject.id, { deliveryDate: quickDeadlineDate });
+                      setEditingDeadlineProjectId(null);
+                    }}
+                    className="px-5 py-2 bg-gradient-to-r from-gold-500 to-gold-400 text-charcoal-950 font-bold text-xs rounded-xl shadow-md hover:scale-105 transition-all cursor-pointer"
+                  >
+                    Save Deadline
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
+
+      {/* VISUAL SIDE-BY-SIDE REVISION COMPARISON & DIFF MODAL */}
+      <AnimatePresence>
+        {comparingProject && (() => {
+          const projRevs = (revisions || [])
+            .filter(r => r.projectId === comparingProject.id)
+            .sort((a, b) => a.revisionNumber - b.revisionNumber);
+
+          const totalCount = projRevs.length;
+          const resolvedCount = projRevs.filter(r => r.status === 'resolved').length;
+          const pendingCount = projRevs.filter(r => r.status === 'pending').length;
+
+          // Helper to get version detail
+          const getVerData = (verId: string) => {
+            if (verId === 'original') {
+              return {
+                id: 'original',
+                label: 'Baseline Scope (Original Specs)',
+                badge: 'ORIGINAL BRIEF',
+                date: comparingProject.shootDate ? `Shot: ${comparingProject.shootDate}` : 'Initial Setup',
+                notes: comparingProject.notes || 'No initial custom notes set during project creation.',
+                status: 'Original Specification',
+                statusType: 'baseline',
+                revNum: 0,
+                isOriginal: true
+              };
+            }
+            if (verId === 'latest') {
+              if (projRevs.length > 0) {
+                const latest = projRevs[projRevs.length - 1];
+                return {
+                  id: latest.id,
+                  label: `REV-#${latest.revisionNumber} (Latest)`,
+                  badge: `REV-#${latest.revisionNumber}`,
+                  date: latest.date,
+                  notes: latest.notes,
+                  status: latest.status === 'resolved' ? 'Fixed / Resolved' : 'Pending Request',
+                  statusType: latest.status,
+                  revNum: latest.revisionNumber,
+                  isOriginal: false
+                };
+              }
+              return {
+                id: 'original',
+                label: 'Baseline Scope',
+                badge: 'ORIGINAL BRIEF',
+                date: 'Initial Setup',
+                notes: comparingProject.notes || 'No initial notes.',
+                status: 'Original Specification',
+                statusType: 'baseline',
+                revNum: 0,
+                isOriginal: true
+              };
+            }
+            const found = projRevs.find(r => r.id === verId);
+            if (found) {
+              return {
+                id: found.id,
+                label: `REV-#${found.revisionNumber}`,
+                badge: `REV-#${found.revisionNumber}`,
+                date: found.date,
+                notes: found.notes,
+                status: found.status === 'resolved' ? 'Fixed / Resolved' : 'Pending Request',
+                statusType: found.status,
+                revNum: found.revisionNumber,
+                isOriginal: false
+              };
+            }
+            return {
+              id: 'unknown',
+              label: 'Unknown Version',
+              badge: 'N/A',
+              date: '-',
+              notes: 'No specs found.',
+              status: 'Unknown',
+              statusType: 'unknown',
+              revNum: 0,
+              isOriginal: false
+            };
+          };
+
+          const verA = getVerData(compareRevAId);
+          const verB = getVerData(compareRevBId);
+
+          const handleSwap = () => {
+            const temp = compareRevAId;
+            setCompareRevAId(compareRevBId);
+            setCompareRevBId(temp);
+          };
+
+          // Handle adding a revision directly inside the comparison modal
+          const handleAddRevInModalSubmit = async (e: React.FormEvent) => {
+            e.preventDefault();
+            if (!modalNewRevNotes.trim()) return;
+            const nextRevNum = projRevs.length + 1;
+            await onAddRevision({
+              projectId: comparingProject.id,
+              revisionNumber: nextRevNum,
+              notes: modalNewRevNotes,
+              date: new Date().toISOString().split('T')[0],
+              status: 'pending'
+            });
+            setModalNewRevNotes('');
+            setIsAddingRevInModal(false);
+            setCompareRevBId('latest');
+          };
+
+          // Copy summary report to clipboard
+          const handleCopySummary = () => {
+            const summaryText = `[REVISION COMPARISON REPORT]
+Project: ${comparingProject.projectName || comparingProject.coupleName} (ID: ${comparingProject.id})
+Total Revisions: ${totalCount} (${resolvedCount} Resolved, ${pendingCount} Pending)
+
+--- VERSION A (${verA.label}) ---
+Date: ${verA.date}
+Status: ${verA.status}
+Notes:
+${verA.notes}
+
+--- VERSION B (${verB.label}) ---
+Date: ${verB.date}
+Status: ${verB.status}
+Notes:
+${verB.notes}
+            `;
+            navigator.clipboard.writeText(summaryText);
+            setCopiedComparison(true);
+            setTimeout(() => setCopiedComparison(false), 2000);
+          };
+
+          return (
+            <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-3 sm:p-6">
+              <div 
+                className="fixed inset-0 bg-black/85 backdrop-blur-md transition-opacity"
+                onClick={() => setComparingProject(null)} 
+              />
+
+              <motion.div
+                initial={{ scale: 0.92, opacity: 0, y: 15 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.92, opacity: 0, y: 15 }}
+                className="relative bg-charcoal-900 border border-gold-500/40 rounded-[32px] p-5 sm:p-7 max-w-5xl w-full shadow-[0_25px_70px_rgba(0,0,0,0.9)] z-10 text-left font-sans my-auto max-h-[90vh] flex flex-col"
+              >
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-white/10 shrink-0 gap-3">
+                  <div className="flex items-start space-x-3">
+                    <div className="p-2.5 rounded-2xl bg-gold-500/20 text-gold-400 border border-gold-500/30 shrink-0">
+                      <GitCompare className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[10px] font-mono tracking-widest text-gold-400 uppercase font-bold bg-gold-500/10 px-2 py-0.5 rounded-md border border-gold-500/20">
+                          Side-by-Side Visual Diff
+                        </span>
+                        <span className="text-[10px] font-mono text-gray-400">
+                          ID: {comparingProject.id}
+                        </span>
+                      </div>
+                      <h2 className="text-xl sm:text-2xl font-bold text-white font-display mt-0.5">
+                        {comparingProject.projectName || comparingProject.coupleName}
+                      </h2>
+                      <p className="text-xs text-gray-400 font-mono mt-0.5">
+                        {comparingProject.eventType} • Studio: {comparingProject.studioName}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Summary Stats & Close Button */}
+                  <div className="flex items-center space-x-3 shrink-0 self-end sm:self-center">
+                    <div className="flex items-center space-x-2 px-3 py-1.5 rounded-2xl bg-black/50 border border-white/10 text-xs font-mono">
+                      <div className="flex flex-col text-right">
+                        <span className="text-[9px] text-gray-400 uppercase">Total Logged</span>
+                        <span className="font-bold text-gold-300">{totalCount} Revisions</span>
+                      </div>
+                      <div className="h-6 w-px bg-white/10 mx-1" />
+                      <div className="flex items-center space-x-1.5">
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">
+                          {resolvedCount} Fixed
+                        </span>
+                        {pendingCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold text-[10px] animate-pulse">
+                            {pendingCount} Pending
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setComparingProject(null)}
+                      className="p-2 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Main Scrollable Content */}
+                <div className="overflow-y-auto pr-1 my-4 space-y-5 flex-1 custom-scrollbar">
+                  {/* Selector Bar & Swap Control */}
+                  <div className="bg-black/60 p-3.5 rounded-2xl border border-gold-500/20 flex flex-col md:flex-row items-center justify-between gap-3">
+                    {/* Left Selector (Version A) */}
+                    <div className="w-full md:w-5/12 space-y-1">
+                      <label className="text-[10px] font-mono text-gold-400 uppercase tracking-wider flex items-center justify-between">
+                        <span>Side A (Baseline / Prior)</span>
+                        <span className="text-gray-500">[{verA.badge}]</span>
+                      </label>
+                      <select
+                        value={compareRevAId}
+                        onChange={(e) => setCompareRevAId(e.target.value)}
+                        className="w-full bg-charcoal-950 border border-white/20 focus:border-gold-500 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none cursor-pointer"
+                      >
+                        <option value="original">Original Project Scope / Initial Brief</option>
+                        {projRevs.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            REV-#{r.revisionNumber} ({r.date}) — {r.status.toUpperCase()}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Center Swap Button */}
+                    <button
+                      type="button"
+                      onClick={handleSwap}
+                      className="p-2.5 rounded-xl bg-gold-500/10 hover:bg-gold-500/30 border border-gold-500/30 text-gold-400 hover:text-gold-200 transition-all cursor-pointer shrink-0"
+                      title="Swap Left and Right Panels"
+                    >
+                      <ArrowLeftRight className="w-4 h-4" />
+                    </button>
+
+                    {/* Right Selector (Version B) */}
+                    <div className="w-full md:w-5/12 space-y-1">
+                      <label className="text-[10px] font-mono text-gold-400 uppercase tracking-wider flex items-center justify-between">
+                        <span>Side B (Target / Revision)</span>
+                        <span className="text-gray-500">[{verB.badge}]</span>
+                      </label>
+                      <select
+                        value={compareRevBId}
+                        onChange={(e) => setCompareRevBId(e.target.value)}
+                        className="w-full bg-charcoal-950 border border-white/20 focus:border-gold-500 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none cursor-pointer"
+                      >
+                        <option value="latest">Latest Active Revision ({projRevs.length > 0 ? `REV-#${projRevs[projRevs.length-1].revisionNumber}` : 'None'})</option>
+                        <option value="original">Original Project Scope / Initial Brief</option>
+                        {projRevs.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            REV-#{r.revisionNumber} ({r.date}) — {r.status.toUpperCase()}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* SIDE-BY-SIDE PANELS GRID */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* PANEL A */}
+                    <div className="bg-charcoal-950/80 rounded-2xl border border-white/10 p-4 flex flex-col justify-between space-y-3 relative overflow-hidden group">
+                      <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-blue-500 to-indigo-500" />
+                      
+                      <div>
+                        {/* Panel Header */}
+                        <div className="flex justify-between items-start pb-3 border-b border-white/10">
+                          <div>
+                            <span className="text-[9px] font-mono text-blue-400 uppercase tracking-widest font-bold block">
+                              Version A Specs
+                            </span>
+                            <h3 className="text-sm font-bold text-white font-display mt-0.5">
+                              {verA.label}
+                            </h3>
+                            <span className="text-[10px] text-gray-400 font-mono">
+                              Date: {verA.date}
+                            </span>
+                          </div>
+
+                          <div className="shrink-0 text-right">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border block ${
+                              verA.statusType === 'baseline'
+                                ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                                : verA.statusType === 'resolved'
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                                : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                            }`}>
+                              {verA.status}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Panel Content Specs Box */}
+                        <div className="mt-3 p-3.5 bg-black/50 rounded-xl border border-white/5 space-y-2 min-h-[140px]">
+                          <span className="text-[10px] font-mono text-gray-500 uppercase block border-b border-white/5 pb-1">
+                            Specs & Requirements Log
+                          </span>
+                          <p className="text-xs text-gray-300 font-sans leading-relaxed whitespace-pre-wrap">
+                            {verA.notes}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-white/5 text-[10px] font-mono text-gray-500 flex justify-between">
+                        <span>Type: {verA.isOriginal ? 'Baseline Specification' : 'Client Revision Spec'}</span>
+                        <span>Rev #{verA.revNum}</span>
+                      </div>
+                    </div>
+
+                    {/* PANEL B */}
+                    <div className="bg-charcoal-950/80 rounded-2xl border border-gold-500/30 p-4 flex flex-col justify-between space-y-3 relative overflow-hidden group shadow-lg">
+                      <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-gold-500 to-amber-500" />
+                      
+                      <div>
+                        {/* Panel Header */}
+                        <div className="flex justify-between items-start pb-3 border-b border-white/10">
+                          <div>
+                            <span className="text-[9px] font-mono text-gold-400 uppercase tracking-widest font-bold block">
+                              Version B Specs
+                            </span>
+                            <h3 className="text-sm font-bold text-white font-display mt-0.5">
+                              {verB.label}
+                            </h3>
+                            <span className="text-[10px] text-gray-400 font-mono">
+                              Date: {verB.date}
+                            </span>
+                          </div>
+
+                          <div className="shrink-0 text-right flex flex-col items-end space-y-1">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border block ${
+                              verB.statusType === 'baseline'
+                                ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                                : verB.statusType === 'resolved'
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                                : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                            }`}>
+                              {verB.status}
+                            </span>
+
+                            {/* Quick Action in Panel B if pending */}
+                            {verB.statusType === 'pending' && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await onResolveRevision(verB.id);
+                                }}
+                                className="px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-charcoal-950 border border-emerald-500/40 rounded-md font-bold text-[9px] transition-all cursor-pointer flex items-center space-x-1"
+                              >
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Mark Resolved</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Panel Content Specs Box with Diff Highlight */}
+                        <div className="mt-3 p-3.5 bg-black/50 rounded-xl border border-gold-500/20 space-y-2 min-h-[140px] relative">
+                          <div className="flex justify-between items-center border-b border-white/5 pb-1">
+                            <span className="text-[10px] font-mono text-gold-400 uppercase block font-semibold">
+                              Specs & Requirements Log
+                            </span>
+                            {verA.notes !== verB.notes && (
+                              <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                ✦ Spec Differences Detected
+                              </span>
+                            )}
+                          </div>
+                          
+                          <p className={`text-xs font-sans leading-relaxed whitespace-pre-wrap ${
+                            verA.notes !== verB.notes
+                              ? 'text-gold-200 bg-gold-500/10 p-2 rounded-lg border-l-2 border-gold-400'
+                              : 'text-gray-300'
+                          }`}>
+                            {verB.notes}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-white/5 text-[10px] font-mono text-gray-500 flex justify-between">
+                        <span>Type: {verB.isOriginal ? 'Baseline Specification' : 'Client Revision Spec'}</span>
+                        <span>Rev #{verB.revNum}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* VISUAL DIFF & CHANGE ANALYSIS CARD */}
+                  <div className="bg-charcoal-950/90 rounded-2xl border border-gold-500/20 p-4 space-y-3">
+                    <div className="flex items-center space-x-2 border-b border-white/10 pb-2">
+                      <Sparkles className="w-4 h-4 text-gold-400" />
+                      <h4 className="text-xs font-bold font-mono text-gold-300 uppercase tracking-wider">
+                        Revision Delta Analysis
+                      </h4>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-mono">
+                      <div className="p-3 bg-black/40 rounded-xl border border-white/5">
+                        <span className="text-[9px] text-gray-400 uppercase block">Status Delta</span>
+                        <div className="mt-1 flex items-center space-x-1.5 text-white font-bold">
+                          <span>{verA.status}</span>
+                          <ChevronRight className="w-3.5 h-3.5 text-gold-400" />
+                          <span className="text-gold-300">{verB.status}</span>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-black/40 rounded-xl border border-white/5">
+                        <span className="text-[9px] text-gray-400 uppercase block">Spec Length Comparison</span>
+                        <p className="mt-1 text-white font-bold">
+                          {verA.notes.length} chars → {verB.notes.length} chars ({verB.notes.length - verA.notes.length > 0 ? `+${verB.notes.length - verA.notes.length}` : verB.notes.length - verA.notes.length})
+                        </p>
+                      </div>
+
+                      <div className="p-3 bg-black/40 rounded-xl border border-white/5">
+                        <span className="text-[9px] text-gray-400 uppercase block">Overall Progress</span>
+                        <p className="mt-1 text-emerald-400 font-bold">
+                          {resolvedCount} of {totalCount} Revisions Resolved ({totalCount > 0 ? Math.round((resolvedCount/totalCount)*100) : 100}%)
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Timeline Sequence Chips */}
+                    <div className="pt-2 border-t border-white/5">
+                      <span className="text-[10px] font-mono text-gray-400 uppercase block mb-2">
+                        Complete Revision History Sequence
+                      </span>
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCompareRevAId('original');
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-mono border transition-all cursor-pointer shrink-0 ${
+                            compareRevAId === 'original' || compareRevBId === 'original'
+                              ? 'bg-blue-500/20 border-blue-500/60 text-blue-300 font-bold'
+                              : 'bg-black/50 border-white/10 text-gray-400 hover:border-gold-500/30'
+                          }`}
+                        >
+                          Original Brief
+                        </button>
+
+                        {projRevs.map((rev) => {
+                          const isSelectedA = compareRevAId === rev.id;
+                          const isSelectedB = compareRevBId === rev.id;
+                          return (
+                            <button
+                              key={rev.id}
+                              type="button"
+                              onClick={() => {
+                                if (compareRevAId === rev.id) return;
+                                setCompareRevBId(rev.id);
+                              }}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-mono border transition-all cursor-pointer shrink-0 flex items-center space-x-1.5 ${
+                                isSelectedB
+                                  ? 'bg-gold-500/20 border-gold-500/60 text-gold-300 font-bold'
+                                  : isSelectedA
+                                  ? 'bg-blue-500/20 border-blue-500/60 text-blue-300 font-bold'
+                                  : 'bg-black/50 border-white/10 text-gray-400 hover:border-gold-500/30'
+                              }`}
+                            >
+                              <span>REV-#{rev.revisionNumber}</span>
+                              <span className={`w-1.5 h-1.5 rounded-full ${rev.status === 'resolved' ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Inline New Revision Form within Modal */}
+                  {isAddingRevInModal && (
+                    <motion.form
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      onSubmit={handleAddRevInModalSubmit}
+                      className="p-4 bg-black/80 rounded-2xl border border-gold-500/40 space-y-3"
+                    >
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold font-mono text-gold-400 uppercase">
+                          Log New Revision Request (REV-#{projRevs.length + 1})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingRevInModal(false)}
+                          className="text-gray-400 hover:text-white text-xs"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                      <textarea
+                        placeholder="Type client revision specs..."
+                        value={modalNewRevNotes}
+                        onChange={(e) => setModalNewRevNotes(e.target.value)}
+                        className="w-full bg-charcoal-950 border border-white/20 focus:border-gold-500 rounded-xl p-3 text-xs text-white placeholder-gray-500 focus:outline-none resize-none h-20"
+                        required
+                      />
+
+                      <div className="flex justify-end space-x-2">
+                        <button
+                          type="submit"
+                          className="px-4 py-1.5 bg-gradient-to-r from-gold-500 to-gold-400 text-charcoal-950 font-bold text-xs rounded-xl shadow cursor-pointer"
+                        >
+                          Add & Compare
+                        </button>
+                      </div>
+                    </motion.form>
+                  )}
+                </div>
+
+                {/* Modal Footer Controls */}
+                <div className="flex flex-col sm:flex-row items-center justify-between pt-4 border-t border-white/10 shrink-0 gap-3">
+                  <div className="flex items-center space-x-2 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingRevInModal(!isAddingRevInModal)}
+                      className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl bg-gold-500/20 hover:bg-gold-500/30 border border-gold-500/40 text-gold-300 text-xs font-bold font-mono flex items-center justify-center space-x-1.5 transition-all cursor-pointer"
+                    >
+                      <PlusCircle className="w-4 h-4 text-gold-400" />
+                      <span>Add New Revision</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCopySummary}
+                      className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-mono flex items-center justify-center space-x-1.5 transition-all cursor-pointer"
+                    >
+                      {copiedComparison ? (
+                        <>
+                          <Check className="w-4 h-4 text-emerald-400" />
+                          <span className="text-emerald-400">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="w-4 h-4 text-gray-400" />
+                          <span>Copy Report</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setComparingProject(null)}
+                    className="w-full sm:w-auto px-6 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl transition-all cursor-pointer"
+                  >
+                    Close Comparison
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
+      {/* Branded Wedding Worksheet Modal */}
+      <ProjectWorksheetModal
+        project={worksheetProject}
+        revisions={revisions}
+        studios={studios}
+        editors={editors}
+        isOpen={isWorksheetModalOpen}
+        onClose={() => setIsWorksheetModalOpen(false)}
+      />
     </div>
   );
 });

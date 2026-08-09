@@ -19,6 +19,7 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import ParallaxCard from './ParallaxCard';
 import { Editor, Project, PaymentHistory } from '../types';
 
 interface EditorsViewProps {
@@ -98,18 +99,69 @@ const EditorsView = React.memo(function EditorsView({
   const [photo, setPhoto] = useState('');
   const [isUploading, setIsUploading] = useState(false);
 
+const PRESET_AVATARS = [
+  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=200',
+  'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&q=80&w=200',
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200',
+  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=200',
+  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200',
+  'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&q=80&w=200',
+  'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200',
+  'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&q=80&w=200'
+];
+
+  const compressImage = (dataUrl: string, maxWidth = 300, maxHeight = 300): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = dataUrl;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.82));
+        } else {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+    });
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 1024 * 1024 * 3) { // 3MB limit
-        alert("Image file size should be less than 3MB.");
+      if (!file.type.startsWith('image/')) {
+        alert("Please select a valid image file.");
         return;
       }
       setIsUploading(true);
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         if (typeof reader.result === 'string') {
-          setPhoto(reader.result);
+          try {
+            const compressed = await compressImage(reader.result, 300, 300);
+            setPhoto(compressed);
+          } catch (err) {
+            setPhoto(reader.result);
+          }
         }
         setIsUploading(false);
       };
@@ -264,11 +316,16 @@ const EditorsView = React.memo(function EditorsView({
         {/* Welcome Header */}
         <div className="p-6 rounded-3xl glass-panel flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center space-x-4">
-            <img
-              src={myEditor.photo || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150'}
-              alt={myEditor.name}
-              className="w-14 h-14 rounded-2xl object-cover border border-gold-500/20"
-            />
+            <div className="relative z-10 hover:z-50 shrink-0">
+              <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-md transition-all duration-300 ease-out hover:scale-[3.5] hover:shadow-2xl cursor-pointer origin-left">
+                <img
+                  src={myEditor.photo || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150'}
+                  alt={myEditor.name}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            </div>
             <div>
               <h2 className="text-xl font-bold font-display text-white">Welcome, {myEditor.name}!</h2>
               <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-gray-400">
@@ -551,16 +608,21 @@ const EditorsView = React.memo(function EditorsView({
               key={editor.id}
               layout
               onClick={() => { setSelectedEditor(editor); setIsDrawerOpen(true); }}
-              className="p-6 rounded-3xl glass-panel relative overflow-hidden flex flex-col justify-between h-80 cursor-pointer group glass-panel-hover"
+              className="p-6 rounded-3xl glass-panel relative hover:z-20 flex flex-col justify-between h-80 cursor-pointer group glass-panel-hover"
             >
               <div>
                 <div className="flex justify-between items-start">
                   <div className="flex items-center space-x-3.5">
-                    <img
-                      src={editor.photo || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150'}
-                      alt={editor.name}
-                      className="w-12 h-12 rounded-2xl object-cover border border-luxury-green-800/30"
-                    />
+                    <div className="relative z-30 hover:z-50 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <div className="w-12 h-12 rounded-2xl overflow-hidden shadow-md transition-all duration-300 ease-out hover:scale-[3.5] hover:shadow-2xl cursor-pointer origin-top-left">
+                        <img
+                          src={editor.photo || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150'}
+                          alt={editor.name}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    </div>
                     <div>
                       <h3 className="text-base font-bold text-white font-display group-hover:text-gold-400 transition-colors leading-tight">
                         {editor.name}
@@ -641,13 +703,34 @@ const EditorsView = React.memo(function EditorsView({
                 {/* Drawer Header details */}
                 <div className="p-6 border-b border-luxury-green-800/20 bg-charcoal-950/50 shrink-0 flex justify-between items-start">
                   <div className="flex items-center space-x-4">
-                    <img
-                      src={selectedEditor.photo || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150'}
-                      alt=""
-                      className="w-14 h-14 rounded-2xl object-cover border border-gold-500/20"
-                    />
+                    <div className="relative z-30 hover:z-50 shrink-0">
+                      <div 
+                        onClick={(e) => openEditModal(selectedEditor, e)}
+                        className="w-14 h-14 rounded-2xl overflow-hidden cursor-pointer group shadow-lg transition-all duration-300 ease-out hover:scale-[3.5] hover:shadow-2xl origin-top-left"
+                        title="Click to Change Photo / Edit Profile"
+                      >
+                        <img
+                          src={selectedEditor.photo || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150'}
+                          alt={selectedEditor.name}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-200 text-gold-400">
+                          <Edit className="w-4 h-4" />
+                        </div>
+                      </div>
+                    </div>
                     <div>
-                      <h2 className="text-xl font-bold font-display text-white">{selectedEditor.name}</h2>
+                      <div className="flex items-center space-x-2">
+                        <h2 className="text-xl font-bold font-display text-white">{selectedEditor.name}</h2>
+                        <button
+                          onClick={(e) => openEditModal(selectedEditor, e)}
+                          className="p-1 hover:bg-gold-500/10 text-gray-400 hover:text-gold-400 rounded-lg transition-colors text-xs flex items-center space-x-1"
+                          title="Edit Profile & Photo"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                       <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-gray-400">
                         <p className="flex items-center space-x-1">
                           <Star className="w-3.5 h-3.5 fill-gold-500 text-gold-500" />
@@ -1009,9 +1092,29 @@ const EditorsView = React.memo(function EditorsView({
                     <label className="block text-[10px] font-mono text-gold-400 uppercase tracking-wider font-semibold">
                       Editor Profile Photo
                     </label>
-                    <div className="flex items-center space-x-4">
+
+                    {/* Quick Preset Avatars */}
+                    <div>
+                      <span className="text-[9px] font-mono text-gray-400 block mb-1.5">Choose Preset Avatar or Upload:</span>
+                      <div className="flex flex-wrap items-center gap-2 mb-3">
+                        {PRESET_AVATARS.map((url, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setPhoto(url)}
+                            className={`w-9 h-9 rounded-xl overflow-hidden transition-all duration-300 relative hover:z-50 hover:scale-[2.5] hover:shadow-2xl origin-center ${
+                              photo === url ? 'ring-2 ring-gold-400/40 opacity-100' : 'opacity-70 hover:opacity-100'
+                            }`}
+                          >
+                            <img src={url} alt={`Avatar ${idx + 1}`} className="w-full h-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-4 pt-1 border-t border-luxury-green-800/10">
                       {/* Avatar circular preview */}
-                      <div className="relative shrink-0 w-16 h-16 rounded-full overflow-hidden border border-gold-500/20 bg-charcoal-900 flex items-center justify-center group">
+                      <div className="relative shrink-0 w-16 h-16 rounded-full overflow-hidden bg-charcoal-900 flex items-center justify-center group shadow-md transition-all duration-300 hover:scale-[3] hover:z-50 hover:shadow-2xl origin-center">
                         {photo ? (
                           <>
                             <img 
@@ -1023,7 +1126,7 @@ const EditorsView = React.memo(function EditorsView({
                             <button
                               type="button"
                               onClick={() => setPhoto('')}
-                              className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] text-red-400 font-mono font-bold transition-opacity duration-200"
+                              className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] text-red-400 font-mono font-bold transition-opacity duration-200"
                             >
                               Remove
                             </button>
@@ -1039,9 +1142,9 @@ const EditorsView = React.memo(function EditorsView({
                       <div className="flex-1 space-y-2">
                         {/* File Upload Selector */}
                         <div className="relative">
-                          <label className="flex items-center justify-center space-x-2 px-3 py-2 bg-[#211715] hover:bg-[#120c0b] border border-gold-500/10 hover:border-gold-500/30 text-gray-300 hover:text-white rounded-xl text-xs transition-all cursor-pointer font-semibold shadow-sm">
+                          <label className="flex items-center justify-center space-x-2 px-3 py-2 bg-[#211715] hover:bg-[#120c0b] border border-gold-500/20 hover:border-gold-500/40 text-gray-300 hover:text-white rounded-xl text-xs transition-all cursor-pointer font-semibold shadow-sm">
                             <Upload className="w-3.5 h-3.5 text-gold-400" />
-                            <span>{isUploading ? "Reading..." : "Upload Profile Photo"}</span>
+                            <span>{isUploading ? "Compressing & Uploading..." : "Upload Local Photo"}</span>
                             <input 
                               type="file" 
                               accept="image/*" 
@@ -1056,7 +1159,7 @@ const EditorsView = React.memo(function EditorsView({
                           <input
                             type="text"
                             placeholder="Or paste image URL (https://...)"
-                            value={photo.startsWith('data:image/') ? '' : photo}
+                            value={photo}
                             onChange={(e) => setPhoto(e.target.value)}
                             className="w-full bg-charcoal-900/60 border border-luxury-green-800/15 rounded-xl px-3 py-1.5 text-[10px] text-gray-300 focus:outline-none placeholder:text-gray-600"
                           />

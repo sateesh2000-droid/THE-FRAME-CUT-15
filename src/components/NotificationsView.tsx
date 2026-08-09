@@ -7,22 +7,38 @@ import {
   CheckCircle, 
   DollarSign, 
   AlertCircle,
-  FileText
+  Zap
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { AppNotification } from '../types';
+import { AppNotification, CalendarEvent } from '../types';
+import BackgroundTaskRunnerWidget from './BackgroundTaskRunnerWidget';
 
 interface NotificationsViewProps {
   notifications: AppNotification[];
+  calendarEvents?: CalendarEvent[];
+  runnerIsRunning?: boolean;
+  runnerLastCheckTime?: Date | null;
+  runnerCheckCount?: number;
+  onRunnerManualCheck?: () => Promise<void>;
   onMarkRead: (id: string) => Promise<void>;
   onClearNotification: (id: string) => Promise<void>;
+  onClearAll?: () => Promise<void>;
+  onClearAllNotifications?: () => Promise<void>;
 }
 
 export default function NotificationsView({ 
   notifications, 
+  calendarEvents = [],
+  runnerIsRunning = false,
+  runnerLastCheckTime = null,
+  runnerCheckCount = 0,
+  onRunnerManualCheck,
   onMarkRead, 
-  onClearNotification 
+  onClearNotification,
+  onClearAll,
+  onClearAllNotifications
 }: NotificationsViewProps) {
+  const handleClearAll = onClearAllNotifications || onClearAll;
 
   const getIcon = (type: AppNotification['type']) => {
     switch (type) {
@@ -30,8 +46,6 @@ export default function NotificationsView({
         return <Clock className="w-5 h-5 text-yellow-400" />;
       case 'payment_pending':
         return <AlertTriangle className="w-5 h-5 text-red-400" />;
-      case 'invoice_pending':
-        return <FileText className="w-5 h-5 text-purple-400" />;
       case 'project_completed':
         return <CheckCircle className="w-5 h-5 text-emerald-400" />;
       case 'revision_request':
@@ -44,8 +58,20 @@ export default function NotificationsView({
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6">
       
+      {/* BACKGROUND TASK RUNNER WIDGET */}
+      {onRunnerManualCheck && (
+        <BackgroundTaskRunnerWidget
+          calendarEvents={calendarEvents}
+          notifications={notifications}
+          isRunning={runnerIsRunning}
+          lastCheckTime={runnerLastCheckTime}
+          checkCount={runnerCheckCount}
+          onManualCheck={onRunnerManualCheck}
+        />
+      )}
+
       {/* Header bar */}
       <div className="p-6 rounded-3xl glass-panel flex justify-between items-center relative overflow-hidden">
         <div>
@@ -53,9 +79,19 @@ export default function NotificationsView({
           <p className="text-xs text-gray-400 mt-1">Automatic workflow status alerts, deadlines, and clearance reminders.</p>
         </div>
 
-        <span className="text-xs font-mono font-bold bg-gold-500/15 border border-gold-500/30 text-gold-400 px-3.5 py-1.5 rounded-full">
-          {unreadCount} UNREAD ALERTS
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-mono font-bold bg-gold-500/15 border border-gold-500/30 text-gold-400 px-3.5 py-1.5 rounded-full">
+            {unreadCount} UNREAD ALERTS
+          </span>
+          {notifications.length > 0 && handleClearAll && (
+            <button
+              onClick={() => handleClearAll()}
+              className="px-3.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 font-mono font-bold text-xs rounded-full cursor-pointer flex items-center gap-1.5 transition-all"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Clear All
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Notifications list */}

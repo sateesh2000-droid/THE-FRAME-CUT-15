@@ -13,9 +13,41 @@
       },
       "required": ["id", "projectName"]
     },
+    "notifications": {
+      "title": "Notifications",
+      "description": "Workflow alerts and automated task deadline notifications",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string" },
+        "projectId": { "type": "string" },
+        "studioId": { "type": "string" },
+        "calendarEventId": { "type": "string" },
+        "isAutomated": { "type": "boolean" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "title", "message", "type", "read"]
+    },
+    "calendar": {
+      "title": "Calendar Events",
+      "description": "Upcoming project shoot, delivery, and revision deadlines",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "start": { "type": "string" },
+        "type": { "type": "string" },
+        "projectId": { "type": "string" },
+        "coupleName": { "type": "string" },
+        "color": { "type": "string" }
+      },
+      "required": ["id", "title", "start"]
+    },
     "invoices": {
       "title": "Invoices",
-      "description": "Billing records generated for studio partners",
+      "description": "GST-compliant luxury bills generated for wedding studio partners",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -26,6 +58,7 @@
         "invoiceDate": { "type": "string" },
         "dueDate": { "type": "string" },
         "subtotal": { "type": "number" },
+        "gstRate": { "type": "number" },
         "gstAmount": { "type": "number" },
         "discount": { "type": "number" },
         "totalAmount": { "type": "number" },
@@ -33,22 +66,7 @@
         "balanceDue": { "type": "number" },
         "status": { "type": "string" }
       },
-      "required": ["id", "projectId", "studioId", "dueDate", "totalAmount"]
-    },
-    "notifications": {
-      "title": "Notifications",
-      "description": "Workflow alerts and overdue payment notifications",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "title": { "type": "string" },
-        "message": { "type": "string" },
-        "type": { "type": "string" },
-        "projectId": { "type": "string" },
-        "studioId": { "type": "string" },
-        "read": { "type": "boolean" }
-      },
-      "required": ["id", "title", "message", "type", "read"]
+      "required": ["id", "projectId", "studioId", "totalAmount"]
     }
   },
   "firestore": {
@@ -56,13 +74,17 @@
       "schema": "projects",
       "description": "Wedding projects collection"
     },
-    "invoices/{invoiceId}": {
-      "schema": "invoices",
-      "description": "Studio invoices collection"
-    },
     "notifications/{notificationId}": {
       "schema": "notifications",
       "description": "System workflow alerts collection"
+    },
+    "calendar/{eventId}": {
+      "schema": "calendar",
+      "description": "Calendar events and project deadlines collection"
+    },
+    "invoices/{invoiceId}": {
+      "schema": "invoices",
+      "description": "Custom GST invoices collection"
     }
   }
 }

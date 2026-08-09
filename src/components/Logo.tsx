@@ -11,48 +11,45 @@ export default function Logo({ className = '', size = 100, showText = false, var
   const uniqueId = useId().replace(/:/g, '');
   const gradientId = `metallic-gradient-${variant}-${uniqueId}`;
 
-  // Select gradient based on variant
+  // Select gradient based on variant - using rich visible colors for both light and dark backgrounds
   const getGradientColors = () => {
     switch (variant) {
       case 'emerald':
         return (
           <>
-            <stop offset="0%" stopColor="#A7F3D0" />
-            <stop offset="30%" stopColor="#34D399" />
-            <stop offset="50%" stopColor="#E6FDF4" />
-            <stop offset="75%" stopColor="#059669" />
+            <stop offset="0%" stopColor="#34D399" />
+            <stop offset="50%" stopColor="#059669" />
             <stop offset="100%" stopColor="#064E3B" />
           </>
         );
       case 'dark':
         return (
           <>
-            <stop offset="0%" stopColor="#4B5563" />
-            <stop offset="30%" stopColor="#1F2937" />
-            <stop offset="50%" stopColor="#9CA3AF" />
-            <stop offset="75%" stopColor="#111827" />
-            <stop offset="100%" stopColor="#030712" />
+            <stop offset="0%" stopColor="#475569" />
+            <stop offset="50%" stopColor="#1E293B" />
+            <stop offset="100%" stopColor="#0F172A" />
           </>
         );
       case 'gold':
       default:
         return (
           <>
-            <stop offset="0%" stopColor="#F3E7C4" />
-            <stop offset="30%" stopColor="#DFBA73" />
-            <stop offset="50%" stopColor="#FFF7E3" />
-            <stop offset="75%" stopColor="#C5A059" />
-            <stop offset="100%" stopColor="#9A7B3E" />
+            <stop offset="0%" stopColor="#F59E0B" />
+            <stop offset="40%" stopColor="#D97706" />
+            <stop offset="70%" stopColor="#B45309" />
+            <stop offset="100%" stopColor="#78350F" />
           </>
         );
     }
   };
 
+  const strokeColor = variant === 'dark' ? '#1E293B' : variant === 'emerald' ? '#059669' : '#D97706';
+
   const shadowClass = variant === 'dark' 
     ? "drop-shadow-[0_2px_6px_rgba(0,0,0,0.15)]" 
     : variant === 'emerald'
     ? "drop-shadow-[0_2px_8px_rgba(52,211,153,0.2)]"
-    : "drop-shadow-[0_2px_8px_rgba(212,175,55,0.25)]";
+    : "drop-shadow-[0_2px_8px_rgba(217,119,6,0.25)]";
 
   return (
     <div className={`flex flex-col items-center justify-center ${className}`}>
@@ -77,6 +74,7 @@ export default function Logo({ className = '', size = 100, showText = false, var
           strokeWidth="3.2"
           strokeLinecap="round"
           strokeLinejoin="round"
+          style={{ stroke: `url(#${gradientId}) ${strokeColor}` }}
         />
 
         {/* Inner arch */}
@@ -86,6 +84,7 @@ export default function Logo({ className = '', size = 100, showText = false, var
           strokeWidth="3.2"
           strokeLinecap="round"
           strokeLinejoin="round"
+          style={{ stroke: `url(#${gradientId}) ${strokeColor}` }}
         />
 
         {/* Left vertical stem of F */}
@@ -95,6 +94,7 @@ export default function Logo({ className = '', size = 100, showText = false, var
           strokeWidth="3.2"
           strokeLinecap="round"
           strokeLinejoin="round"
+          style={{ stroke: `url(#${gradientId}) ${strokeColor}` }}
         />
 
         {/* Middle crossbar of F */}
@@ -104,6 +104,7 @@ export default function Logo({ className = '', size = 100, showText = false, var
           strokeWidth="3.2"
           strokeLinecap="round"
           strokeLinejoin="round"
+          style={{ stroke: `url(#${gradientId}) ${strokeColor}` }}
         />
 
         {/* Horizontal base divider line */}
@@ -112,23 +113,24 @@ export default function Logo({ className = '', size = 100, showText = false, var
           stroke={`url(#${gradientId})`}
           strokeWidth="2.8"
           strokeLinecap="round"
+          style={{ stroke: `url(#${gradientId}) ${strokeColor}` }}
         />
 
         {/* Small bottom-left dot */}
-        <circle cx="32" cy="57" r="1.8" fill={`url(#${gradientId})`} />
+        <circle cx="32" cy="57" r="1.8" fill={`url(#${gradientId})`} style={{ fill: strokeColor }} />
       </svg>
 
       {showText && (
         <div className="text-center mt-3 select-none">
-          <h2 className={`${variant === 'dark' ? 'text-charcoal-900' : 'text-gold-500'} font-bold tracking-[0.25em] text-sm font-display leading-none`}>
-            THE FRAME CUT
+          <h2 className={`${variant === 'dark' ? 'text-slate-900' : 'text-amber-600'} font-bold tracking-[0.25em] text-sm font-display leading-none`}>
+            THE FRAME CUTS
           </h2>
           <div className="flex items-center justify-center space-x-2 mt-1.5 opacity-80">
-            <div className="h-[1px] w-8 bg-gradient-to-r from-transparent to-gold-500/50" />
-            <span className="text-gray-400 text-[8px] font-mono tracking-[0.3em] uppercase leading-none">
+            <div className="h-[1px] w-8 bg-gradient-to-r from-transparent to-amber-500/50" />
+            <span className="text-slate-500 text-[8px] font-mono tracking-[0.3em] uppercase leading-none">
               STUDIO OS
             </span>
-            <div className="h-[1px] w-8 bg-gradient-to-l from-transparent to-gold-500/50" />
+            <div className="h-[1px] w-8 bg-gradient-to-l from-transparent to-amber-500/50" />
           </div>
         </div>
       )}

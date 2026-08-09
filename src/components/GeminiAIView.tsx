@@ -18,14 +18,13 @@ import {
   Workflow
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { Project, Studio, Editor, Expense, Invoice, CalendarEvent, UserProfile } from "../types";
+import { Project, Studio, Editor, Expense, CalendarEvent, UserProfile } from "../types";
 
 interface GeminiAIViewProps {
   projects: Project[];
   studios: Studio[];
   editors: Editor[];
   expenses: Expense[];
-  invoices: Invoice[];
   calendarEvents: CalendarEvent[];
   currentUser: UserProfile | null;
 }
@@ -44,7 +43,6 @@ export default function GeminiAIView({
   studios,
   editors,
   expenses,
-  invoices,
   calendarEvents,
   currentUser
 }: GeminiAIViewProps) {
@@ -111,15 +109,13 @@ Try clicking one of the live workspace suggestions below or type your custom que
       })),
       studiosSummary: studios.map(s => {
         const studioProjects = projects.filter(p => p.studioId === s.id);
-        const studioInvoices = invoices.filter(i => i.studioId === s.id);
-        const pendingInvoices = studioInvoices.filter(i => i.status !== "paid");
         return {
           id: s.id,
           name: s.name,
           ownerName: s.ownerName,
           address: s.address,
           totalProjects: studioProjects.length,
-          pendingAmount: pendingInvoices.reduce((sum, inv) => sum + inv.balanceDue, 0)
+          pendingAmount: studioProjects.reduce((sum, p) => sum + (p.remainingBalance || 0), 0)
         };
       }),
       editorsSummary: editors.map(e => {
@@ -135,10 +131,7 @@ Try clicking one of the live workspace suggestions below or type your custom que
       }),
       financesSummary: {
         totalExpenses: expenses.reduce((sum, e) => sum + e.amount, 0),
-        expenseCategories: expenses.map(e => ({ category: e.category, amount: e.amount, date: e.date })),
-        totalInvoicedAmount: invoices.reduce((sum, i) => sum + i.totalAmount, 0),
-        totalReceivedAmount: invoices.reduce((sum, i) => sum + i.amountPaid, 0),
-        invoicesList: invoices.map(i => ({ id: i.id, amount: i.totalAmount, balanceDue: i.balanceDue, status: i.status }))
+        expenseCategories: expenses.map(e => ({ category: e.category, amount: e.amount, date: e.date }))
       },
       calendarEventsCount: calendarEvents.length
     };
@@ -294,9 +287,9 @@ Unable to process your request at this time.
     },
     {
       id: "finance",
-      title: "Cashflow & Invoice Audit",
+      title: "Cashflow & Financial Audit",
       desc: "Outstanding collections & balances",
-      prompt: "Review our current invoicing and payment stats. Audit outstanding collections, studio balances, and summarize our estimated revenue vs expenses.",
+      prompt: "Review our current project revenue and payment stats. Audit outstanding collections, studio balances, and summarize our estimated revenue vs expenses.",
       icon: TrendingUp,
       color: "from-gold-500/10 to-gold-500/5 text-gold-400 border-gold-500/20"
     },
@@ -312,7 +305,7 @@ Unable to process your request at this time.
       id: "draft_email",
       title: "Client Payment Follow-up",
       desc: "Polite reminder for unpaid dues",
-      prompt: "Based on our pending invoices and outstanding studio balances, write a professional, polite but firm email reminder for payment from our wedding studios.",
+      prompt: "Based on our outstanding project balances, write a professional, polite but firm email reminder for payment from our partner wedding studios.",
       icon: Mail,
       color: "from-purple-500/10 to-purple-500/5 text-purple-400 border-purple-500/20"
     }
@@ -581,14 +574,6 @@ Unable to process your request at this time.
                   <span>Editors Roster</span>
                 </span>
                 <span className="text-white font-bold">{editors.length} Editors</span>
-              </div>
-
-              <div className="p-2 bg-charcoal-950/60 rounded-xl border border-luxury-green-800/5 flex items-center justify-between">
-                <span className="flex items-center space-x-1.5 text-gray-400">
-                  <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Invoice Audit Ledger</span>
-                </span>
-                <span className="text-white font-bold">{invoices.length} Invoices</span>
               </div>
             </div>
 

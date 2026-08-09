@@ -67,7 +67,7 @@ export async function seedDatabaseIfEmpty() {
 
     // 1. Seed Default Studios
     const defaultStudios = [
-      { id: 'studio-kk', name: 'Wedding By KK', ownerName: 'KK Sharma', phone: '+91 98765 43210', email: 'kk@weddingbykk.com', address: 'Bandra West, Mumbai', gstNumber: '27AAAAA1111A1Z1', notes: 'Premium studio, prefers gold cinema color tone.', createdAt: new Date() },
+      { id: 'studio-kk', name: 'Wedding By KK', ownerName: 'Satish Tiwari', phone: '+91 98765 43210', email: 'kk@weddingbykk.com', address: 'Bandra West, Mumbai', gstNumber: '27AAAAA1111A1Z1', notes: 'Premium studio, prefers gold cinema color tone.', createdAt: new Date() },
       { id: 'studio-moment', name: 'Moment Innovator', ownerName: 'Amit Verma', phone: '+91 98111 22233', email: 'amit@momentinnovator.com', address: 'Saket, New Delhi', gstNumber: '07BBBBB2222B2Z2', notes: 'High volume pre-weddings and weddings.', createdAt: new Date() },
       { id: 'studio-kriti', name: 'Kriti Photo', ownerName: 'Kriti Sen', phone: '+91 95555 66677', email: 'kriti@kritiphoto.com', address: 'Salt Lake, Kolkata', gstNumber: '19CCCCC3333C3Z3', notes: 'Specializes in artistic traditional events.', createdAt: new Date() },
       { id: 'studio-licious', name: 'The Wedding Licious', ownerName: 'Rajesh Mehta', phone: '+91 99999 88888', email: 'rajesh@weddinglicious.com', address: 'Indiranagar, Bengaluru', gstNumber: '29DDDDD4444D4Z4', notes: 'Luxury high-budget cinematic weddings.', createdAt: new Date() }
@@ -92,6 +92,7 @@ export async function seedDatabaseIfEmpty() {
     // 3. Seed Default Users (Admin + Editor profiles)
     const defaultUsers = [
       { uid: 'admin-satish', email: 'satish@framecut.com', name: 'Satish Tiwari', role: 'admin', createdAt: new Date() },
+      { uid: 'admin-satish-alt', email: 'sateeshtiwari3@gmail.com', name: 'Satish Tiwari', role: 'admin', createdAt: new Date() },
       { uid: 'editor-vansh-auth', email: 'vansh@framecut.com', name: 'Vansh Tiwari', role: 'editor', editorId: 'editor-vansh', createdAt: new Date() },
       { uid: 'studio-kk-auth', email: 'kk@weddingbykk.com', name: 'Wedding By KK', role: 'studio', studioId: 'studio-kk', createdAt: new Date() }
     ];
@@ -248,19 +249,10 @@ export async function seedDatabaseIfEmpty() {
       batch.set(docRef, exp);
     });
 
-    // 6. Seed Invoices
-    const defaultInvoices = [
-      { id: 'INV-2026-001', projectId: 'PRJ-2026-001', coupleName: 'Aarav & Meera', studioId: 'studio-kk', studioName: 'Wedding By KK', invoiceDate: '2026-06-25', dueDate: '2026-07-05', subtotal: 85000, gstAmount: 15300, discount: 0, totalAmount: 100300, amountPaid: 40000, balanceDue: 60300, gstNumber: '27AAAAA1111A1Z1', status: 'sent', createdAt: new Date() },
-      { id: 'INV-2026-004', projectId: 'PRJ-2026-004', coupleName: 'Kabir & Rhea', studioId: 'studio-kriti', studioName: 'Kriti Photo', invoiceDate: '2026-05-20', dueDate: '2026-05-30', subtotal: 70000, gstAmount: 0, discount: 5000, totalAmount: 65000, amountPaid: 65000, balanceDue: 0, gstNumber: '19CCCCC3333C3Z3', status: 'paid', createdAt: new Date() }
-    ];
-
-    defaultInvoices.forEach(inv => {
-      const docRef = doc(db, 'invoices', inv.id);
-      batch.set(docRef, inv);
-    });
-
-    // 7. Seed Calendar Events
+    // 6. Seed Calendar Events
     const defaultEvents = [
+      { id: 'evt-today-1', title: 'Master Cut Export & QC Review', start: '2026-08-09', type: 'delivery', projectId: 'PRJ-2026-001', coupleName: 'Aarav & Meera', color: '#EF4444' },
+      { id: 'evt-tomorrow-1', title: 'Client Revision Approval Call', start: '2026-08-10', type: 'revision', projectId: 'PRJ-2026-003', coupleName: 'Vikram & Pooja', color: '#F59E0B' },
       { id: 'evt-1', title: 'Deliver Aarav & Meera Teaser', start: '2026-07-05', type: 'delivery', projectId: 'PRJ-2026-001', coupleName: 'Aarav & Meera', color: '#EAB308' },
       { id: 'evt-2', title: 'Deliver Rohan & Dia Highlights', start: '2026-07-15', type: 'delivery', projectId: 'PRJ-2026-002', coupleName: 'Rohan & Dia', color: '#10B981' },
       { id: 'evt-3', title: 'Udaipur Shoot Date Reference', start: '2026-06-20', type: 'shoot', projectId: 'PRJ-2026-003', coupleName: 'Vikram & Pooja', color: '#3B82F6' },
@@ -298,8 +290,7 @@ export async function seedDatabaseIfEmpty() {
     // 10. Seed Notifications
     const defaultNotifications = [
       { id: 'notif-1', title: 'Revision Request', message: 'Wedding By KK submitted a revision for Aarav & Meera.', type: 'revision_request', projectId: 'PRJ-2026-001', read: false, createdAt: new Date(Date.now() - 3600000) },
-      { id: 'notif-2', title: 'Delivery Pending Tomorrow', message: 'Aarav & Meera is due for delivery tomorrow!', type: 'delivery_tomorrow', projectId: 'PRJ-2026-001', read: false, createdAt: new Date(Date.now() - 7200000) },
-      { id: 'notif-3', title: 'Invoice Unpaid', message: 'Invoice INV-2026-001 for Aarav & Meera has been outstanding for 5 days.', type: 'payment_pending', projectId: 'PRJ-2026-001', read: true, createdAt: new Date(Date.now() - 86400000) }
+      { id: 'notif-2', title: 'Delivery Pending Tomorrow', message: 'Aarav & Meera is due for delivery tomorrow!', type: 'delivery_tomorrow', projectId: 'PRJ-2026-001', read: false, createdAt: new Date(Date.now() - 7200000) }
     ];
 
     defaultNotifications.forEach(notif => {

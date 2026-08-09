@@ -1,1690 +1,2792 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Receipt, 
-  Printer, 
-  Share2, 
-  Send, 
-  Check, 
-  IndianRupee, 
-  FileText, 
-  ChevronRight, 
-  Mail, 
-  Phone,
-  Settings,
-  AlertCircle,
-  Trash2
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import SwipeableCard from './SwipeableCard';
-import { Project, Studio, Invoice } from '../types';
-import Logo from './Logo';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase';
+import Logo from './Logo';
+import { 
+  Building2, 
+  Calendar, 
+  Plus, 
+  Eye, 
+  FileText, 
+  FileCheck,
+  CheckCircle2,
+  Send, 
+  Mail, 
+  Printer, 
+  Save, 
+  Check, 
+  QrCode, 
+  Trash2, 
+  Sparkles,
+  IndianRupee,
+  Film,
+  X,
+  Share2,
+  ExternalLink,
+  Loader2,
+  MessageSquare,
+  Settings,
+  RotateCcw,
+  Sliders,
+  Zap,
+  Copy,
+  CheckSquare,
+  Tag,
+  HelpCircle
+} from 'lucide-react';
+import { Studio, Project, PaymentHistory, UserProfile } from '../types';
 
-interface ReceivedPayment {
+export interface WhatsAppInvoiceTemplate {
   id: string;
-  amount: number;
-  receivedFrom: string;
+  stageName: string;
+  description: string;
+  badge: string;
+  color: string;
+  templateText: string;
 }
+
+const DEFAULT_INVOICE_WA_TEMPLATES: Record<string, WhatsAppInvoiceTemplate> = {
+  billing: {
+    id: 'billing',
+    stageName: 'Initial Tax Invoice & Billing',
+    description: 'Standard format when generating a new tax invoice or project breakdown',
+    badge: 'STAGE 1',
+    color: 'emerald',
+    templateText: `*TAX INVOICE: {INVOICE_NO}*
+*Studio:* {STUDIO_NAME}
+*Date:* {DATE}
+
+*PROJECT BREAKDOWN:*
+{PROJECT_LIST}
+
+*Project Total:* ₹{PROJECT_TOTAL}
+{PREVIOUS_BALANCE}{ADVANCE_ADJUST}{DISCOUNT}----------------------------
+*TOTAL PAYABLE: ₹{TOTAL_PAYABLE}*
+
+{PDF_ATTACHMENT}*BANK DETAILS FOR PAYMENT:*
+A/C Holder: {ACCOUNT_HOLDER}
+Bank: {BANK_NAME}
+A/C No: {ACCOUNT_NUMBER}
+IFSC: {IFSC_CODE}
+UPI ID: {UPI_ID}
+
+{DRIVE_LINK}{NOTES}Thank you for choosing The Frame Cut Studio!`
+  },
+  reminder: {
+    id: 'reminder',
+    stageName: 'Payment Reminder / Follow-up',
+    description: 'Polite reminder notice for pending invoice balance',
+    badge: 'STAGE 2',
+    color: 'amber',
+    templateText: `*PAYMENT REMINDER - INVOICE {INVOICE_NO}*
+
+Dear {STUDIO_NAME},
+
+This is a gentle reminder regarding the pending balance of *₹{TOTAL_PAYABLE}* for Invoice *{INVOICE_NO}* dated {DATE}.
+
+*Payment Summary:*
+• Invoice Total: ₹{PROJECT_TOTAL}
+• Balance Payable: *₹{TOTAL_PAYABLE}*
+
+{PDF_ATTACHMENT}*PAYMENT OPTIONS:*
+• UPI ID: {UPI_ID}
+• Bank: {BANK_NAME} | A/C: {ACCOUNT_NUMBER} | IFSC: {IFSC_CODE}
+• Account Holder: {ACCOUNT_HOLDER}
+
+Kindly acknowledge or clear the pending amount at your earliest convenience. Thank you!`
+  },
+  partial_advance: {
+    id: 'partial_advance',
+    stageName: 'Advance / Partial Payment Receipt',
+    description: 'Acknowledgement sent when advance or partial payment is received',
+    badge: 'STAGE 3',
+    color: 'blue',
+    templateText: `*PARTIAL PAYMENT RECEIPT - INVOICE {INVOICE_NO}*
+
+Dear {STUDIO_NAME},
+
+We have received partial payment/advance for Invoice *{INVOICE_NO}*.
+
+*Updated Ledger Summary:*
+• Project Total: ₹{PROJECT_TOTAL}
+• Advance Received: -₹{ADVANCE_TOTAL}
+• Discount: -₹{DISCOUNT}
+• *REMAINING PAYABLE BALANCE: ₹{TOTAL_PAYABLE}*
+
+{PDF_ATTACHMENT}*BANK / UPI DETAILS:*
+UPI ID: {UPI_ID}
+Bank: {BANK_NAME} ({ACCOUNT_NUMBER})
+
+Thank you for your payment!`
+  },
+  paid_settled: {
+    id: 'paid_settled',
+    stageName: 'Full Settlement & File Delivery',
+    description: 'Confirmation sent when full payment is received & files are delivered',
+    badge: 'STAGE 4',
+    color: 'purple',
+    templateText: `*INVOICE SETTLED & PAID IN FULL - {INVOICE_NO}*
+
+Dear {STUDIO_NAME},
+
+Thank you! We have received full payment of *₹{TOTAL_PAYABLE}* for Invoice *{INVOICE_NO}*.
+
+*Google Drive Delivery Link:*
+{DRIVE_LINK}
+
+{PDF_ATTACHMENT}It was an absolute pleasure working with you. Looking forward to our next project together!`
+  }
+};
+
+const AVAILABLE_VARIABLE_TAGS = [
+  { tag: '{INVOICE_NO}', label: 'Invoice No', example: 'AI-2026-0015' },
+  { tag: '{STUDIO_NAME}', label: 'Studio Name', example: 'Wedding By KK' },
+  { tag: '{DATE}', label: 'Date', example: '2026-08-06' },
+  { tag: '{PROJECT_LIST}', label: 'Project List', example: '1. Rahul & Priya - ₹85,000' },
+  { tag: '{PROJECT_TOTAL}', label: 'Project Total', example: '85,000' },
+  { tag: '{PREVIOUS_BALANCE}', label: 'Previous Balance', example: 'Previous Balance: ₹10,000' },
+  { tag: '{ADVANCE_ADJUST}', label: 'Advance Adjusted', example: 'Advance Adjusted: -₹15,000' },
+  { tag: '{ADVANCE_TOTAL}', label: 'Advance Amount', example: '15,000' },
+  { tag: '{DISCOUNT}', label: 'Discount', example: 'Discount: -₹2,000' },
+  { tag: '{TOTAL_PAYABLE}', label: 'Total Payable', example: '68,000' },
+  { tag: '{PDF_ATTACHMENT}', label: 'Attached PDF Path', example: '📎 ATTACHED INVOICE PDF DOCUMENT: ...' },
+  { tag: '{ACCOUNT_HOLDER}', label: 'Account Holder', example: 'The Frame Cut Studio' },
+  { tag: '{BANK_NAME}', label: 'Bank Name', example: 'HDFC Bank' },
+  { tag: '{ACCOUNT_NUMBER}', label: 'Account Number', example: '501002345678' },
+  { tag: '{IFSC_CODE}', label: 'IFSC Code', example: 'HDFC0001234' },
+  { tag: '{UPI_ID}', label: 'UPI ID', example: 'framecut@hdfcbank' },
+  { tag: '{DRIVE_LINK}', label: 'Drive Link', example: 'https://drive.google.com/...' },
+  { tag: '{NOTES}', label: 'Notes', example: 'Notes: Delivery in 5 days' },
+];
 
 interface InvoiceViewProps {
   projects: Project[];
   studios: Studio[];
-  invoices: Invoice[];
-  onAddInvoice: (invoice: Omit<Invoice, 'id' | 'createdAt'>) => Promise<void>;
-  onDeleteInvoice?: (id: string) => Promise<void>;
-  onUpdateInvoice?: (id: string, updates: Partial<Invoice>) => Promise<void>;
+  payments: PaymentHistory[];
+  invoices?: any[];
+  currentUser: UserProfile | null;
+  onLogPayment?: (payment: Omit<PaymentHistory, 'id' | 'createdAt'>) => Promise<void>;
+  onSaveInvoiceDraft?: (invoiceData: any) => Promise<void>;
+  onDeleteInvoiceDraft?: (id: string) => Promise<void>;
 }
 
 export default function InvoiceView({
   projects,
   studios,
-  invoices,
-  onAddInvoice,
-  onDeleteInvoice,
-  onUpdateInvoice
+  payments,
+  invoices = [],
+  currentUser,
+  onLogPayment,
+  onSaveInvoiceDraft,
+  onDeleteInvoiceDraft
 }: InvoiceViewProps) {
-  const [selectedStudioId, setSelectedStudioId] = useState<string>('');
-  const [discount, setDiscount] = useState<number>(0);
-  const [includeGst, setIncludeGst] = useState<boolean>(true);
-  const [invoiceId, setInvoiceId] = useState<string>('');
-  const [upiId, setUpiId] = useState<string>('');
-  const [paymentLink, setPaymentLink] = useState<string>('');
-  const [qrType, setQrType] = useState<'upi' | 'link'>('upi');
-
-  const [showPaymentsManager, setShowPaymentsManager] = useState<boolean>(true);
-  const [newPaymentAmount, setNewPaymentAmount] = useState<number>(0);
-  const [newPaymentFrom, setNewPaymentFrom] = useState<string>('');
-  const [receivedPayments, setReceivedPayments] = useState<ReceivedPayment[]>([
-    { id: 'pay-1', amount: 25000, receivedFrom: 'Bunty Bhaiya' },
-    { id: 'pay-2', amount: 20000, receivedFrom: 'Kunal Bhaiya' },
-    { id: 'pay-3', amount: 10000, receivedFrom: 'Bunty Bhaiya' },
-    { id: 'pay-4', amount: 20000, receivedFrom: 'Bunty Bhaiya' },
-    { id: 'pay-5', amount: 20000, receivedFrom: 'Bunty Bhaiya' },
-    { id: 'pay-6', amount: 10000, receivedFrom: 'Kunal Bhaiya' },
-    { id: 'pay-7', amount: 15000, receivedFrom: 'Kunal Bhaiya' },
-  ]);
-
-  const handleAddPayment = () => {
-    if (!newPaymentFrom.trim()) {
-      triggerToast("Missing Info", "Please enter the person's name who made the payment.", "info");
-      return;
+  // 1. Studio Selection
+  const initialStudioId = useMemo(() => {
+    if (currentUser?.role === 'studio' && currentUser.studioId) {
+      return currentUser.studioId;
     }
-    if (newPaymentAmount <= 0) {
-      triggerToast("Invalid Amount", "Please enter a valid payment amount greater than 0.", "info");
-      return;
-    }
-    const newPay: ReceivedPayment = {
-      id: `pay-${Date.now()}`,
-      amount: newPaymentAmount,
-      receivedFrom: newPaymentFrom.trim()
-    };
-    setReceivedPayments([...receivedPayments, newPay]);
-    setNewPaymentAmount(0);
-    setNewPaymentFrom('');
-    triggerToast("Payment Added", `Added payment of ₹${newPay.amount.toLocaleString('en-IN')} from ${newPay.receivedFrom}!`);
-  };
+    return studios[0]?.id || '';
+  }, [currentUser, studios]);
 
-  const handleRemovePayment = (id: string) => {
-    setReceivedPayments(receivedPayments.filter(p => p.id !== id));
-    triggerToast("Payment Removed", "Payment entry deleted from statement ledger.");
-  };
-  
-  // Custom Toast and confirmation state
-  const [invoiceToDeleteId, setInvoiceToDeleteId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ title: string; desc: string; type: 'success' | 'info' } | null>(null);
-
-  const triggerToast = (title: string, desc: string, type: 'success' | 'info' = 'success') => {
-    setToast({ title, desc, type });
-    setTimeout(() => setToast(null), 4000);
-  };
-
-  // Simulated Email Notification state
-  const [isSimulatingEmail, setIsSimulatingEmail] = useState(false);
-  const [simulationStep, setSimulationStep] = useState<number>(0);
-  const [simulationLogs, setSimulationLogs] = useState<string[]>([]);
-  const [showSimulationModal, setShowSimulationModal] = useState<boolean>(false);
-  
-  // Loaded state based on selected studio
-  const [currentStudio, setCurrentStudio] = useState<Studio | null>(null);
+  const [selectedStudioId, setSelectedStudioId] = useState<string>(initialStudioId);
 
   useEffect(() => {
-    if (studios.length > 0 && !selectedStudioId) {
-      setSelectedStudioId(studios[0].id);
+    if (initialStudioId && !selectedStudioId) {
+      setSelectedStudioId(initialStudioId);
     }
+  }, [initialStudioId]);
+
+  const currentStudio = useMemo(() => {
+    return studios.find(s => s.id === selectedStudioId) || studios[0] || null;
   }, [studios, selectedStudioId]);
 
-  // Derive projects dynamically on every render to ensure always up-to-date and avoid stale state
-  const studioProjects = projects.filter(p => p.studioId === selectedStudioId);
+  // Invoice Meta
+  const [invoiceNo, setInvoiceNo] = useState<string>('AI-2026-0015');
+  const [invoiceDate, setInvoiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
-  // Keep track of the studio ID that we last loaded credentials for to avoid over-writing user inputs
-  const [lastLoadedStudioId, setLastLoadedStudioId] = useState<string>('');
+  // Filter projects for selected studio
+  const studioProjects = useMemo(() => {
+    if (!selectedStudioId) return [];
+    return projects.filter(p => p.studioId === selectedStudioId);
+  }, [projects, selectedStudioId]);
+
+  // Project Checkbox Selections state (projectId -> boolean)
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Record<string, boolean>>({});
+
+  // Auto-select projects when studio changes
+  useEffect(() => {
+    const initialSelections: Record<string, boolean> = {};
+    studioProjects.forEach(p => {
+      initialSelections[p.id] = true;
+    });
+    setSelectedProjectIds(initialSelections);
+  }, [selectedStudioId, studioProjects]);
+
+  const allProjectsSelected = useMemo(() => {
+    if (studioProjects.length === 0) return false;
+    return studioProjects.every(p => selectedProjectIds[p.id]);
+  }, [studioProjects, selectedProjectIds]);
+
+  const handleToggleSelectAllProjects = () => {
+    const targetState = !allProjectsSelected;
+    const newSel: Record<string, boolean> = {};
+    studioProjects.forEach(p => {
+      newSel[p.id] = targetState;
+    });
+    setSelectedProjectIds(newSel);
+  };
+
+  const handleToggleProject = (id: string) => {
+    setSelectedProjectIds(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  // Calculate Project Total from selected projects
+  const selectedProjectsTotal = useMemo(() => {
+    return studioProjects
+      .filter(p => selectedProjectIds[p.id])
+      .reduce((sum, p) => sum + (p.projectAmount || 0), 0);
+  }, [studioProjects, selectedProjectIds]);
+
+  // Filter Advance Payments for selected studio
+  const studioPayments = useMemo(() => {
+    if (!selectedStudioId) return [];
+    return payments.filter(p => p.entityId === selectedStudioId && p.entityType === 'studio');
+  }, [payments, selectedStudioId]);
+
+  // Local state for advance payment items (combines existing payments + locally added)
+  const [advanceList, setAdvanceList] = useState<Array<{
+    id: string;
+    date: string;
+    paidBy: string;
+    paymentMode: string;
+    amount: number;
+    adjusted: boolean;
+  }>>([]);
 
   useEffect(() => {
-    const studio = studios.find(s => s.id === selectedStudioId) || null;
-    setCurrentStudio(studio);
-    if (studio) {
-      // Auto invoice ID with a clean, dynamic prefix from the studio's name
-      const cleanPrefix = studio.name.trim().slice(0, 3).toUpperCase().replace(/[^A-Z]/g, 'ST');
-      setInvoiceId(`INV-2026-${cleanPrefix}`);
+    const mapped = studioPayments.map(p => ({
+      id: p.id,
+      date: p.date,
+      paidBy: p.receivedFrom || 'Studio Client',
+      paymentMode: p.paymentMethod || 'UPI',
+      amount: p.amount || 0,
+      adjusted: true
+    }));
 
-      // Sync payment info from studio profile ONLY if selectedStudioId has changed
-      if (selectedStudioId !== lastLoadedStudioId) {
-        setUpiId(studio.upiId || '7772999933@icici');
-        setPaymentLink(studio.paymentLink || '');
-        setQrType(studio.upiId ? 'upi' : (studio.paymentLink ? 'link' : 'upi'));
-        setLastLoadedStudioId(selectedStudioId);
-      }
+    // If no payments found for this studio, provide sample default entries matching wireframe demo
+    if (mapped.length === 0) {
+      setAdvanceList([
+        { id: 'adv-1', date: '2026-07-13', paidBy: 'Krishna', paymentMode: 'Cash', amount: 10000, adjusted: true },
+        { id: 'adv-2', date: '2026-07-17', paidBy: 'Rahul', paymentMode: 'Online (UPI)', amount: 5000, adjusted: true }
+      ]);
     } else {
-      if (selectedStudioId !== lastLoadedStudioId) {
-        setUpiId('7772999933@icici');
-        setPaymentLink('');
-        setLastLoadedStudioId(selectedStudioId);
+      setAdvanceList(mapped);
+    }
+  }, [studioPayments, selectedStudioId]);
+
+  const handleToggleAdvanceAdjust = (id: string) => {
+    setAdvanceList(prev => prev.map(item => item.id === id ? { ...item, adjusted: !item.adjusted } : item));
+  };
+
+  const handleUpdateAdvanceMode = (id: string, mode: string) => {
+    setAdvanceList(prev => prev.map(item => item.id === id ? { ...item, paymentMode: mode } : item));
+  };
+
+  const handleDeleteAdvance = (id: string) => {
+    setAdvanceList(prev => prev.filter(item => item.id !== id));
+  };
+
+  // Calculate Cash vs Online Advance Totals
+  const cashAdvanceTotal = useMemo(() => {
+    return advanceList
+      .filter(a => a.adjusted && (a.paymentMode.toLowerCase().includes('cash')))
+      .reduce((sum, a) => sum + a.amount, 0);
+  }, [advanceList]);
+
+  const onlineAdvanceTotal = useMemo(() => {
+    return advanceList
+      .filter(a => a.adjusted && (!a.paymentMode.toLowerCase().includes('cash')))
+      .reduce((sum, a) => sum + a.amount, 0);
+  }, [advanceList]);
+
+  // Add Advance Modal
+  const [showAddAdvanceModal, setShowAddAdvanceModal] = useState(false);
+  const [newAdvPaidBy, setNewAdvPaidBy] = useState('');
+  const [newAdvAmount, setNewAdvAmount] = useState<number | ''>('');
+  const [newAdvMode, setNewAdvMode] = useState('UPI');
+  const [newAdvDate, setNewAdvDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const handleCreateAdvance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAdvAmount || Number(newAdvAmount) <= 0) return;
+
+    const amountNum = Number(newAdvAmount);
+    const newEntry = {
+      id: `adv-${Date.now()}`,
+      date: newAdvDate,
+      paidBy: newAdvPaidBy || 'Studio Client',
+      paymentMode: newAdvMode,
+      amount: amountNum,
+      adjusted: true
+    };
+
+    setAdvanceList(prev => [...prev, newEntry]);
+
+    if (onLogPayment && selectedStudioId) {
+      try {
+        await onLogPayment({
+          entityId: selectedStudioId,
+          entityType: 'studio',
+          projectId: '',
+          projectCoupleName: `${currentStudio?.name || 'Studio'} Advance`,
+          amount: amountNum,
+          date: newAdvDate,
+          paymentMethod: newAdvMode,
+          receivedFrom: newAdvPaidBy || 'Studio Client',
+          notes: 'Recorded via Invoice View Advance Payment'
+        });
+      } catch (err) {
+        console.error("Error logging payment:", err);
       }
     }
-  }, [selectedStudioId, studios, lastLoadedStudioId]);
 
-  // Calculations across all studio projects
-  const subtotal = studioProjects.reduce((sum, p) => sum + p.projectAmount, 0);
-  const advance = studioProjects.reduce((sum, p) => sum + p.advancePayment, 0);
-  const gstRate = 0.18; // 18% GST for services
-  const gstAmount = includeGst ? Math.round((subtotal - discount) * gstRate) : 0;
-  const totalAmount = subtotal - discount + gstAmount;
-  const totalPaymentsReceived = receivedPayments.reduce((sum, p) => sum + p.amount, 0);
-  const balanceDue = Math.max(0, totalAmount - totalPaymentsReceived);
-
-  const getQrCodeData = () => {
-    if (qrType === 'upi' && upiId) {
-      const payeeName = upiId.trim() === '7772999933@icici' ? 'SATISH TIWARI' : 'THE FRAME CUT';
-      return `upi://pay?pa=${upiId.trim()}&pn=${encodeURIComponent(payeeName)}&am=${balanceDue}&cu=INR&tn=${encodeURIComponent('Invoice ' + invoiceId)}`;
-    }
-    if (qrType === 'link' && paymentLink) {
-      return paymentLink.trim();
-    }
-    return '';
+    setNewAdvPaidBy('');
+    setNewAdvAmount('');
+    setShowAddAdvanceModal(false);
   };
 
-  const qrData = getQrCodeData();
+  const advanceTotal = useMemo(() => {
+    return advanceList
+      .filter(a => a.adjusted)
+      .reduce((sum, a) => sum + a.amount, 0);
+  }, [advanceList]);
 
-  // Invoice generator handlers
-  const handlePrint = () => {
-    window.print();
+  // Invoice Summary calculation inputs
+  const [previousBalance, setPreviousBalance] = useState<number>(12000);
+  const [discount, setDiscount] = useState<number>(0);
+
+  // Total Payable = Project Total + Previous Balance - Advance Adjust - Discount
+  const totalPayable = useMemo(() => {
+    const val = selectedProjectsTotal + previousBalance - advanceTotal - discount;
+    return val < 0 ? 0 : val;
+  }, [selectedProjectsTotal, previousBalance, advanceTotal, discount]);
+
+  // Payment Details (Pre-filled defaults matching user request)
+  const [accountHolder, setAccountHolder] = useState('SATISH TIWARI');
+  const [bankName, setBankName] = useState('ICICI BANK');
+  const [accountNumber, setAccountNumber] = useState('390701503993');
+  const [ifscCode, setIfscCode] = useState('ICIC0003907');
+  const [upiId, setUpiId] = useState('7772999933@upi');
+
+  // Delivery
+  const [driveLink, setDriveLink] = useState('');
+  const [notes, setNotes] = useState('');
+
+  // Top Stats Calculations
+  const totalProjectsCount = studioProjects.length;
+  const totalBusiness = studioProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0);
+  const totalReceived = advanceList.reduce((sum, a) => sum + a.amount, 0);
+  const outstanding = totalBusiness - totalReceived > 0 ? totalBusiness - totalReceived : 0;
+  const lastPayment = advanceList.length > 0 ? advanceList[advanceList.length - 1].amount : 0;
+
+  // Modals, Toast, Tab Navigation & WhatsApp Templates state
+  const [activeInvoiceTab, setActiveInvoiceTab] = useState<'builder' | 'templates' | 'history'>('builder');
+  const [selectedStage, setSelectedStage] = useState<string>('billing');
+  const [editingStage, setEditingStage] = useState<string>('billing');
+
+  const [templates, setTemplates] = useState<Record<string, WhatsAppInvoiceTemplate>>(() => {
+    try {
+      const saved = localStorage.getItem('tfc_invoice_wa_templates');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { ...DEFAULT_INVOICE_WA_TEMPLATES, ...parsed };
+      }
+    } catch (e) {
+      console.warn('Error reading stored invoice WA templates:', e);
+    }
+    return DEFAULT_INVOICE_WA_TEMPLATES;
+  });
+
+  const [activeEditingText, setActiveEditingText] = useState<string>(() => {
+    return templates['billing']?.templateText || DEFAULT_INVOICE_WA_TEMPLATES['billing'].templateText;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('tfc_invoice_wa_templates', JSON.stringify(templates));
+    } catch (e) {
+      console.warn('Error saving invoice WA templates to localStorage:', e);
+    }
+  }, [templates]);
+
+  useEffect(() => {
+    if (templates[editingStage]) {
+      setActiveEditingText(templates[editingStage].templateText);
+    }
+  }, [editingStage, templates]);
+
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [attachedPdfPath, setAttachedPdfPath] = useState<string>('');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const printInvoiceRef = useRef<HTMLDivElement>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const handleExportPDF = () => {
-    if (!currentStudio) return '';
+  // Lookup existing saved invoice in Firestore (if any)
+  const currentSavedInvoice = useMemo(() => {
+    return invoices.find(inv => inv.id === invoiceNo || inv.invoiceNo === invoiceNo);
+  }, [invoices, invoiceNo]);
 
-    const doc = new jsPDF({
-      orientation: 'portrait',
+  const effectivePdfPath = attachedPdfPath || currentSavedInvoice?.pdfDocumentPath || '';
+
+  // Dynamic QR Code URL for UPI
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(accountHolder)}&am=${totalPayable}`;
+
+  // Format WhatsApp message text using template for stage
+  const getFormattedMessageText = (stageKey: string, customTemplateText?: string) => {
+    const tmplText = customTemplateText !== undefined 
+      ? customTemplateText 
+      : (templates[stageKey]?.templateText || DEFAULT_INVOICE_WA_TEMPLATES[stageKey]?.templateText || '');
+
+    let projectListStr = '';
+    const selectedProjs = studioProjects.filter(p => selectedProjectIds[p.id]);
+    if (selectedProjs.length > 0) {
+      selectedProjs.forEach((p, idx) => {
+        projectListStr += `${idx + 1}. ${p.coupleName} (${p.eventType || 'Wedding'}) - ₹${p.projectAmount.toLocaleString('en-IN')}\n`;
+      });
+    } else {
+      projectListStr = '1. General Photography Project - ₹0';
+    }
+
+    const pdfStr = effectivePdfPath ? `📎 *ATTACHED INVOICE PDF DOCUMENT:* ${effectivePdfPath}\n\n` : '';
+    const prevBalStr = previousBalance > 0 ? `*Previous Balance:* ₹${previousBalance.toLocaleString('en-IN')}\n` : '';
+    const advStr = advanceTotal > 0 ? `*Advance Adjusted:* -₹${advanceTotal.toLocaleString('en-IN')}\n` : '';
+    const discStr = discount > 0 ? `*Discount:* -₹${discount.toLocaleString('en-IN')}\n` : '';
+    const driveStr = driveLink ? `*GOOGLE DRIVE DELIVERY LINK:*\n${driveLink}\n\n` : '';
+    const notesStr = notes ? `*Notes:* ${notes}\n\n` : '';
+
+    return tmplText
+      .replace(/\{INVOICE_NO\}/g, invoiceNo || 'AI-2026-0015')
+      .replace(/\{STUDIO_NAME\}/g, currentStudio?.name || 'Wedding By KK')
+      .replace(/\{DATE\}/g, invoiceDate || new Date().toISOString().split('T')[0])
+      .replace(/\{PROJECT_LIST\}/g, projectListStr.trimEnd())
+      .replace(/\{PROJECT_TOTAL\}/g, selectedProjectsTotal.toLocaleString('en-IN'))
+      .replace(/\{PREVIOUS_BALANCE\}/g, prevBalStr)
+      .replace(/\{ADVANCE_ADJUST\}/g, advStr)
+      .replace(/\{ADVANCE_TOTAL\}/g, advanceTotal.toLocaleString('en-IN'))
+      .replace(/\{DISCOUNT\}/g, discStr)
+      .replace(/\{TOTAL_PAYABLE\}/g, totalPayable.toLocaleString('en-IN'))
+      .replace(/\{PDF_ATTACHMENT\}/g, pdfStr)
+      .replace(/\{ACCOUNT_HOLDER\}/g, accountHolder || 'The Frame Cut Studio')
+      .replace(/\{BANK_NAME\}/g, bankName || 'HDFC Bank')
+      .replace(/\{ACCOUNT_NUMBER\}/g, accountNumber || '501002345678')
+      .replace(/\{IFSC_CODE\}/g, ifscCode || 'HDFC0001234')
+      .replace(/\{UPI_ID\}/g, upiId || 'framecut@upi')
+      .replace(/\{DRIVE_LINK\}/g, driveStr)
+      .replace(/\{NOTES\}/g, notesStr);
+  };
+
+  // WhatsApp formatted string generator for active selected stage
+  const getWhatsAppMessage = () => {
+    const raw = getFormattedMessageText(selectedStage);
+    return encodeURIComponent(raw);
+  };
+
+  const handleSaveStageTemplate = (stageKey: string) => {
+    setTemplates(prev => ({
+      ...prev,
+      [stageKey]: {
+        ...prev[stageKey],
+        templateText: activeEditingText
+      }
+    }));
+    showToast(`✅ Saved custom template for: ${templates[stageKey]?.stageName || stageKey}`);
+  };
+
+  const handleResetStageTemplate = (stageKey: string) => {
+    const defaultObj = DEFAULT_INVOICE_WA_TEMPLATES[stageKey];
+    if (defaultObj) {
+      setActiveEditingText(defaultObj.templateText);
+      setTemplates(prev => ({
+        ...prev,
+        [stageKey]: { ...defaultObj }
+      }));
+      showToast(`🔄 Reset template for stage: ${defaultObj.stageName}`);
+    }
+  };
+
+  const handleInsertTagToEditor = (tag: string) => {
+    setActiveEditingText(prev => prev + ' ' + tag);
+    showToast(`Added tag ${tag} to template`);
+  };
+
+  // Fallback vector-based jsPDF builder (runs if html2canvas ever fails)
+  const generateVectorPdfDirect = (): { pdf: jsPDF; fileName: string; file: File } => {
+    const pdf = new jsPDF({
+      orientation: 'p',
       unit: 'mm',
       format: 'a4'
     });
 
-    // Helper to draw the exact vector logo matching Logo.tsx
-    const drawLogoInPDF = (pdfDoc: any, x: number, y: number, size: number, colorOverride?: string) => {
-      const scale = size / 100;
-      pdfDoc.saveGraphicsState();
-      const drawColor = colorOverride || '#C5A059';
-      pdfDoc.setDrawColor(drawColor);
-      
-      // Horizontal base line: from (23, 50) to (77, 50)
-      const x1 = x + 23 * scale;
-      const y1 = y + 50 * scale;
-      const x2 = x + 77 * scale;
-      const y2 = y + 50 * scale;
-      pdfDoc.setLineWidth(2.8 * scale);
-      pdfDoc.line(x1, y1, x2, y2);
-      
-      // Left vertical stem of F: from (32, 28) to (32, 49)
-      pdfDoc.setLineWidth(3.2 * scale);
-      pdfDoc.line(x + 32 * scale, y + 28 * scale, x + 32 * scale, y + 49 * scale);
-      
-      // Middle crossbar of F: from (32, 38.5) to (43.5, 38.5)
-      pdfDoc.line(x + 32 * scale, y + 38.5 * scale, x + 43.5 * scale, y + 38.5 * scale);
-      
-      // Inner arch line segment: from (53, 49) to (53, 68)
-      pdfDoc.line(x + 53 * scale, y + 49 * scale, x + 53 * scale, y + 68 * scale);
-      
-      // Outer arch line segment: from (61.5, 41.5) to (61.5, 68)
-      pdfDoc.line(x + 61.5 * scale, y + 41.5 * scale, x + 61.5 * scale, y + 68 * scale);
-      
-      // Draw Inner Arch (smooth curve):
-      const innerArchPts = [];
-      for (let a = 270; a <= 360; a += 5) {
-        const rad = (a * Math.PI) / 180;
-        const px = 32 + 21 * Math.cos(rad);
-        const py = 49 + 21 * Math.sin(rad);
-        innerArchPts.push({ x: x + px * scale, y: y + py * scale });
-      }
-      for (let i = 0; i < innerArchPts.length - 1; i++) {
-        pdfDoc.line(innerArchPts[i].x, innerArchPts[i].y, innerArchPts[i+1].x, innerArchPts[i+1].y);
-      }
-      
-      // Draw Outer Arch (smooth curve):
-      const outerArchPts = [];
-      for (let a = 270; a <= 360; a += 5) {
-        const rad = (a * Math.PI) / 180;
-        const px = 47.5 + 14 * Math.cos(rad);
-        const py = 41.5 + 17 * Math.sin(rad);
-        outerArchPts.push({ x: x + px * scale, y: y + py * scale });
-      }
-      for (let i = 0; i < outerArchPts.length - 1; i++) {
-        pdfDoc.line(outerArchPts[i].x, outerArchPts[i].y, outerArchPts[i+1].x, outerArchPts[i+1].y);
-      }
+    const cleanStudioName = currentStudio?.name ? currentStudio.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Studio';
+    const fileName = `Invoice_${invoiceNo}_${cleanStudioName}.pdf`;
 
-      // Small bottom-left dot: circle cx="32", cy="57", r="1.8"
-      pdfDoc.setFillColor(drawColor);
-      pdfDoc.ellipse(x + 32 * scale, y + 57 * scale, 1.8 * scale, 1.8 * scale, 'F');
-      
-      pdfDoc.restoreGraphicsState();
-    };
+    // Modern Dark Header Banner
+    pdf.setFillColor(15, 23, 42); // slate-900
+    pdf.rect(0, 0, 210, 38, 'F');
 
-    // Helper to draw clean watermark on any PDF page
-    const drawWatermarkOnPDFPage = (pdfDoc: any) => {
-      drawLogoInPDF(pdfDoc, 55, 105, 100, '#FDFBFA');
-      pdfDoc.setFont('Helvetica', 'bold');
-      pdfDoc.setFontSize(11);
-      pdfDoc.setTextColor('#EFE8D9');
-      pdfDoc.text('THE FRAME CUT', 105, 185, { align: 'center' });
-      
-      pdfDoc.setFont('Helvetica', 'bold');
-      pdfDoc.setFontSize(8);
-      pdfDoc.setTextColor('#F5EDE0');
-      pdfDoc.text('CONFIDENTIAL STATEMENT', 105, 191, { align: 'center' });
-    };
+    // Title & Studio Name
+    pdf.setTextColor(245, 158, 11); // Amber-500
+    pdf.setFontSize(16);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('THE FRAME CUTS STUDIO', 14, 15);
 
-    // Brand Colors
-    const primaryColor = '#111827'; // Luxurious Dark Charcoal
-    const accentColor = '#C5A059'; // Metallic Gold
-    const textColor = '#374151'; // Charcoal Gray
-    const fillBgColor = '#F6F3EB'; // Soft champagne cream
+    pdf.setTextColor(203, 213, 225); // Slate-300
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('CINEMATIC WEDDING SUITE & POST PRODUCTION', 14, 21);
+    pdf.text('Email: contact@theframecuts.com | Phone: +91 77729 99933', 14, 26);
 
-    // Set font size & styling and draw premium vector logo mark
-    drawLogoInPDF(doc, 13, 14, 15);
+    // Invoice Badge Right
+    pdf.setFillColor(245, 158, 11);
+    pdf.roundedRect(135, 7, 62, 24, 3, 3, 'F');
 
-    doc.setTextColor(primaryColor);
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(20);
-    doc.text('THE FRAME CUT', 28, 24);
+    pdf.setTextColor(15, 23, 42);
+    pdf.setFontSize(11);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('TAX INVOICE', 166, 14, { align: 'center' });
 
-    doc.setFont('Helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor('#C5A059'); // Gold accent
-    doc.text('CINEMATIC VIDEO POST-PRODUCTION SUITES', 28, 28);
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text(`Invoice #: ${invoiceNo}`, 166, 19, { align: 'center' });
+    pdf.text(`Date: ${invoiceDate}`, 166, 24, { align: 'center' });
 
-    // Header Right - INVOICE
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(22);
-    doc.setTextColor(primaryColor);
-    doc.text('INVOICE', 195, 25, { align: 'right' });
+    let y = 44;
 
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor('#C5A059');
-    doc.text(invoiceId, 195, 30, { align: 'right' });
+    // Bill To & Issued By Cards
+    pdf.setDrawColor(226, 232, 240);
+    pdf.setFillColor(248, 250, 252);
+    pdf.roundedRect(14, y, 88, 28, 2, 2, 'FD');
+    pdf.roundedRect(108, y, 88, 28, 2, 2, 'FD');
 
-    // Date and terms
-    doc.setFont('Helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor('#6B7280');
-    doc.text(`Date: ${new Date().toISOString().split('T')[0]}`, 195, 35, { align: 'right' });
-    doc.text('Due on Delivery', 195, 39, { align: 'right' });
+    // Left Bill To
+    pdf.setTextColor(217, 119, 6);
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('INVOICE TO:', 18, y + 6);
 
-    // Company info left
-    doc.text('Satish Tiwari, Managing Admin', 15, 42);
-    doc.text('Mumbai, Maharashtra, India', 15, 46);
-    doc.text('satish@framecut.com | +91 98333 44455', 15, 50);
+    pdf.setTextColor(15, 23, 42);
+    pdf.setFontSize(11);
+    pdf.text(currentStudio?.name || 'Wedding By KK', 18, y + 12);
 
-    // Divider line
-    doc.setDrawColor(229, 231, 235);
-    doc.setLineWidth(0.5);
-    doc.line(15, 56, 195, 56);
+    pdf.setTextColor(71, 85, 105);
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text(`Attn: ${currentStudio?.ownerName || 'Studio Director'}`, 18, y + 18);
+    pdf.text(`Phone: ${currentStudio?.phone || '+91 98260 00000'}`, 18, y + 23);
 
-    // Billed To & Assignment Summary
-    // Left column: Billed To
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor('#9CA3AF');
-    doc.text('BILLED TO PARTNER', 15, 65);
+    // Right Issued By
+    pdf.setTextColor(4, 120, 87);
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('PAYMENT RECEIVER:', 112, y + 6);
 
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor('#111827');
-    doc.text(currentStudio.name, 15, 71);
+    pdf.setTextColor(15, 23, 42);
+    pdf.setFontSize(11);
+    pdf.text('THE FRAME CUTS STUDIO', 112, y + 12);
 
-    doc.setFont('Helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor('#4B5563');
-    doc.text(`Owner: ${currentStudio.ownerName || 'Billed Studio Partner'}`, 15, 76);
-    doc.text(currentStudio.address || 'India', 15, 81);
-    doc.text(currentStudio.phone || '', 15, 86);
-    if (currentStudio.gstNumber) {
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(8);
-      doc.setTextColor('#6B7280');
-      doc.text(`GSTIN: ${currentStudio.gstNumber}`, 15, 92);
+    pdf.setTextColor(71, 85, 105);
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('Satish Tiwari — Founder & Lead Director', 112, y + 18);
+    pdf.text('Raipur, Chhattisgarh, India', 112, y + 23);
+
+    y += 34;
+
+    // Section 1: Project Services Table
+    pdf.setTextColor(15, 23, 42);
+    pdf.setFontSize(9);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('1. PROJECT SERVICES & DELIVERABLES', 14, y);
+    y += 4;
+
+    pdf.setFillColor(15, 23, 42);
+    pdf.rect(14, y, 182, 7, 'F');
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFontSize(8);
+    pdf.text('Project / Event Description', 18, y + 5);
+    pdf.text('Qty', 120, y + 5, { align: 'center' });
+    pdf.text('Rate (Rs.)', 150, y + 5, { align: 'right' });
+    pdf.text('Total (Rs.)', 190, y + 5, { align: 'right' });
+
+    y += 7;
+
+    const selectedProjs = studioProjects.filter(p => selectedProjectIds[p.id]);
+    if (selectedProjs.length === 0) {
+      pdf.setTextColor(148, 163, 184);
+      pdf.setFontSize(8);
+      pdf.text('No specific projects selected', 18, y + 5);
+      y += 8;
+    } else {
+      selectedProjs.forEach((p) => {
+        pdf.setDrawColor(241, 245, 249);
+        pdf.line(14, y + 8, 196, y + 8);
+
+        pdf.setTextColor(15, 23, 42);
+        pdf.setFontSize(9);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(p.coupleName || 'Wedding Project', 18, y + 5);
+
+        pdf.setTextColor(100, 116, 139);
+        pdf.setFontSize(7.5);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(p.eventType || 'Full Post-Production', 18, y + 8);
+
+        pdf.setTextColor(15, 23, 42);
+        pdf.setFontSize(8);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('1', 120, y + 6, { align: 'center' });
+        pdf.text(`Rs. ${p.projectAmount.toLocaleString('en-IN')}`, 150, y + 6, { align: 'right' });
+        pdf.text(`Rs. ${p.projectAmount.toLocaleString('en-IN')}`, 190, y + 6, { align: 'right' });
+
+        y += 10;
+      });
     }
 
-    // Right column: Brand Logo
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor('#9CA3AF');
-    doc.text('OFFICIAL BRAND IDENTITY', 115, 65);
+    y += 4;
 
-    // Draw the beautiful vector logo matching the user's uploaded asset
-    drawLogoInPDF(doc, 137, 66, 26);
+    // Section 2: Advances Table
+    const adjustedAdvances = advanceList.filter(a => a.adjusted);
+    if (adjustedAdvances.length > 0) {
+      pdf.setTextColor(4, 120, 87);
+      pdf.setFontSize(9);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('2. ADVANCE PAYMENTS RECEIVED & ADJUSTED', 14, y);
+      y += 4;
 
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor('#111827');
-    doc.text('THE FRAME CUT', 150, 91, { align: 'center' });
+      pdf.setFillColor(6, 78, 59);
+      pdf.rect(14, y, 182, 6, 'F');
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFontSize(7.5);
+      pdf.text('Date', 18, y + 4.5);
+      pdf.text('Received From', 55, y + 4.5);
+      pdf.text('Payment Mode', 120, y + 4.5, { align: 'center' });
+      pdf.text('Amount (Rs.)', 190, y + 4.5, { align: 'right' });
 
-    // BACKGROUND WATERMARK WITH 25% TRANSPARENCY
-    // Draw the beautiful vector logo watermark with confidential statement
-    drawWatermarkOnPDFPage(doc);
+      y += 6;
 
-    // Divider line
-    doc.setDrawColor(229, 231, 235);
-    doc.setLineWidth(0.5);
-    doc.line(15, 98, 195, 98);
+      adjustedAdvances.forEach((adv) => {
+        pdf.setDrawColor(236, 253, 245);
+        pdf.line(14, y + 6, 196, y + 6);
 
-    // Table Header
-    doc.setFillColor('#F3F4F6');
-    doc.rect(15, 104, 180, 8, 'F');
-
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.setTextColor('#4B5563');
-    doc.text('Wedding Project / Couple & Details', 18, 109.5);
-    doc.text('Cinematic Deliverables', 85, 109.5);
-    doc.text('Budget', 192, 109.5, { align: 'right' });
-
-    // Helper to draw consistent footer with or without signature
-    const drawFooterOnPage = (pdfDoc: any, pageNum: number, isLastPage: boolean) => {
-      const sigY = 245;
-      pdfDoc.setDrawColor(209, 213, 219);
-      pdfDoc.setLineWidth(0.3);
-      pdfDoc.line(15, sigY, 195, sigY);
-
-      pdfDoc.setFont('Helvetica', 'normal');
-      pdfDoc.setFontSize(8);
-      pdfDoc.setTextColor('#9CA3AF');
-      pdfDoc.text('System Generated Consolidated Invoicing Statement', 15, sigY + 8);
-      pdfDoc.text(`The Frame Cut Studio OS © 2026 | Page ${pageNum}`, 15, sigY + 12);
-
-      if (isLastPage) {
-        // Signature right
-        pdfDoc.setFont('Helvetica', 'italic');
-        pdfDoc.setFontSize(11);
-        pdfDoc.setTextColor('#4B5563');
-        pdfDoc.text('Satish Tiwari', 165, sigY + 8, { align: 'center' });
+        pdf.setTextColor(71, 85, 105);
+        pdf.setFontSize(8);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(new Date(adv.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }), 18, y + 4.5);
         
-        pdfDoc.setDrawColor(209, 213, 219);
-        pdfDoc.setLineWidth(0.3);
-        pdfDoc.line(145, sigY + 10, 185, sigY + 10);
+        pdf.setTextColor(15, 23, 42);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(adv.paidBy || 'Studio Client', 55, y + 4.5);
 
-        pdfDoc.setFont('Helvetica', 'bold');
-        pdfDoc.setFontSize(7.5);
-        pdfDoc.setTextColor('#9CA3AF');
-        pdfDoc.text('AUTHORIZED MANAGER SIGNATURE', 165, sigY + 14, { align: 'center' });
-      }
-    };
+        pdf.setTextColor(4, 120, 87);
+        pdf.text(adv.paymentMode.toUpperCase(), 120, y + 4.5, { align: 'center' });
 
-    // Table Rows
-    let currentPageNum = 1;
-    let currentY = 118;
+        pdf.text(`Rs. ${adv.amount.toLocaleString('en-IN')}`, 190, y + 4.5, { align: 'right' });
 
-    studioProjects.forEach((p) => {
-      const pageLimit = (currentPageNum === 1) ? 205 : 225;
-
-      if (currentY > pageLimit) {
-        // Draw non-last page footer
-        drawFooterOnPage(doc, currentPageNum, false);
-        
-        // Add a new page
-        doc.addPage();
-        currentPageNum++;
-
-        // Draw background watermark
-        drawWatermarkOnPDFPage(doc);
-
-        // Running Header
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.setTextColor(primaryColor);
-        doc.text('THE FRAME CUT', 15, 18);
-
-        doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(7.5);
-        doc.setTextColor('#C5A059');
-        doc.text(`CONSOLIDATED STATEMENT - ${invoiceId}`, 15, 22);
-
-        // Date on right
-        doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(8);
-        doc.setTextColor('#6B7280');
-        doc.text(`Date: ${new Date().toISOString().split('T')[0]}`, 195, 18, { align: 'right' });
-
-        // Simplified Table Header
-        doc.setFillColor('#F3F4F6');
-        doc.rect(15, 27, 180, 8, 'F');
-
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.setTextColor('#4B5563');
-        doc.text('Wedding Project / Couple & Details (Continued)', 18, 32);
-        doc.text('Cinematic Deliverables', 85, 32);
-        doc.text('Budget', 192, 32, { align: 'right' });
-
-        currentY = 41;
-      }
-
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor('#111827');
-      doc.text(p.coupleName, 18, currentY);
-
-      doc.setFont('Helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor('#6B7280');
-      doc.text(`Shoot: ${p.shootDate}`, 18, currentY + 4);
-
-      // Draw Cinematic Deliverables at x = 85 with '+' formatting
-      doc.setFont('Helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor('#4B5563');
-      const deliverablesText = p.eventType ? p.eventType.replace(/, /g, ' + ') : 'Wedding Film';
-      const lines = doc.splitTextToSize(deliverablesText, 95);
-      doc.text(lines, 85, currentY);
-
-      // Draw Budget at x = 192 (right-aligned)
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor('#111827');
-      doc.text(`INR ${p.projectAmount.toLocaleString('en-IN')}`, 192, currentY, { align: 'right' });
-
-      const rowHeight = Math.max(12, 6 + (lines.length * 3.5));
-      // Row separator
-      doc.setDrawColor(243, 244, 246);
-      doc.setLineWidth(0.3);
-      doc.line(15, currentY + rowHeight - 5, 195, currentY + rowHeight - 5);
-      currentY += rowHeight;
-    });
-
-    if (receivedPayments.length > 0) {
-      if (currentY > 180) {
-        drawFooterOnPage(doc, currentPageNum, false);
-        doc.addPage();
-        currentPageNum++;
-        drawWatermarkOnPDFPage(doc);
-        currentY = 32;
-      } else {
-        currentY += 8;
-      }
-
-      // Draw Payments Header
-      doc.setFillColor('#ECFDF5'); // soft light emerald background
-      doc.rect(15, currentY - 5, 180, 8, 'F');
-
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor('#047857'); // emerald green
-      doc.text('PAYMENTS RECEIVED HISTORY', 18, currentY);
-      doc.text('Amount', 192, currentY, { align: 'right' });
-
-      currentY += 6;
-
-      receivedPayments.forEach((pay, idx) => {
-        if (currentY > 235) {
-          drawFooterOnPage(doc, currentPageNum, false);
-          doc.addPage();
-          currentPageNum++;
-          drawWatermarkOnPDFPage(doc);
-          currentY = 32;
-
-          // Repeat small header
-          doc.setFillColor('#ECFDF5');
-          doc.rect(15, currentY - 5, 180, 8, 'F');
-          doc.setFont('Helvetica', 'bold');
-          doc.setFontSize(8.5);
-          doc.setTextColor('#047857');
-          doc.text('PAYMENTS RECEIVED HISTORY (Continued)', 18, currentY);
-          doc.text('Amount', 192, currentY, { align: 'right' });
-          currentY += 6;
-        }
-
-        doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(8);
-        doc.setTextColor('#4B5563');
-        doc.text(`Payment Receipt #${idx + 1} - Recd from ${pay.receivedFrom}`, 18, currentY);
-
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.setTextColor('#047857');
-        doc.text(`INR ${pay.amount.toLocaleString('en-IN')}`, 192, currentY, { align: 'right' });
-
-        // Row line
-        doc.setDrawColor(240, 253, 244);
-        doc.setLineWidth(0.25);
-        doc.line(15, currentY + 2.5, 195, currentY + 2.5);
-
-        currentY += 6.5;
+        y += 7;
       });
 
-      // Total payments line
-      if (currentY > 235) {
-        drawFooterOnPage(doc, currentPageNum, false);
-        doc.addPage();
-        currentPageNum++;
-        drawWatermarkOnPDFPage(doc);
-        currentY = 32;
-      }
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor('#111827');
-      doc.text('Total Payments Received:', 18, currentY);
-      doc.setTextColor('#047857');
-      doc.text(`INR ${totalPaymentsReceived.toLocaleString('en-IN')}`, 192, currentY, { align: 'right' });
-      currentY += 8;
+      y += 4;
     }
 
-    if (studioProjects.length === 0) {
-      doc.setFont('Helvetica', 'italic');
-      doc.setFontSize(9);
-      doc.setTextColor('#9CA3AF');
-      doc.text('No active wedding projects found in company registry.', 105, 125, { align: 'center' });
-      currentY = 135;
+    // Ledger Summary Box Right
+    pdf.setFillColor(15, 23, 42);
+    pdf.roundedRect(108, y, 88, 38, 2, 2, 'F');
+
+    pdf.setTextColor(226, 232, 240);
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'normal');
+
+    pdf.text('Sub Total:', 114, y + 7);
+    pdf.text(`Rs. ${selectedProjectsTotal.toLocaleString('en-IN')}`, 190, y + 7, { align: 'right' });
+
+    if (previousBalance > 0) {
+      pdf.text('Previous Pending Balance:', 114, y + 12);
+      pdf.text(`+Rs. ${previousBalance.toLocaleString('en-IN')}`, 190, y + 12, { align: 'right' });
     }
 
-    // Determine bottom sections start point dynamically
-    let bottomY: number;
-    if (currentPageNum === 1) {
-      if (currentY > 190) {
-        // Draw current page footer
-        drawFooterOnPage(doc, currentPageNum, false);
-        doc.addPage();
-        currentPageNum++;
-
-        // Draw background watermark
-        drawWatermarkOnPDFPage(doc);
-
-        // Running Header
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.setTextColor(primaryColor);
-        doc.text('THE FRAME CUT', 15, 18);
-
-        doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(7.5);
-        doc.setTextColor('#C5A059');
-        doc.text(`CONSOLIDATED STATEMENT - ${invoiceId}`, 15, 22);
-
-        bottomY = 32;
-      } else {
-        bottomY = Math.max(currentY + 6, 150);
-      }
-    } else {
-      if (currentY > 190) {
-        drawFooterOnPage(doc, currentPageNum, false);
-        doc.addPage();
-        currentPageNum++;
-
-        // Draw background watermark
-        drawWatermarkOnPDFPage(doc);
-
-        // Running Header
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.setTextColor(primaryColor);
-        doc.text('THE FRAME CUT', 15, 18);
-
-        doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(7.5);
-        doc.setTextColor('#C5A059');
-        doc.text(`CONSOLIDATED STATEMENT - ${invoiceId}`, 15, 22);
-
-        bottomY = 32;
-      } else {
-        bottomY = currentY + 6;
-      }
-    }
-
-    // Bottom Divider
-    doc.setDrawColor(229, 231, 235);
-    doc.setLineWidth(0.5);
-    doc.line(15, bottomY, 195, bottomY);
-
-    // Bottom Calculations & Terms
-    // Left: Terms
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(accentColor); // Premium gold
-    doc.text('TERMS & SETTLEMENTS', 15, bottomY + 10);
-
-    doc.setFont('Helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor('#6B7280');
-    
-    let termsText = 'Consolidated ledger statement of active post-production. Please clear remaining balance dues for final raw assets delivery.';
-    
-    termsText += '\n\nBANK TRANSFER DETAILS:';
-    termsText += '\n- Bank Name: ICICI BANK';
-    termsText += '\n- Account Holder: SATISH TIWARI';
-    termsText += '\n- Account Number: 390701503993';
-    termsText += '\n- IFSC Code: ICIC0003907';
-    termsText += '\n- Account Type: Savings';
-    termsText += `\n- VPA (UPI ID): ${upiId ? upiId.trim() : '7772999933@icici'}`;
-    
-    if (paymentLink) {
-      termsText += `\n- Direct Gateway: ${paymentLink.trim()}`;
-    }
-    const splitTerms = doc.splitTextToSize(termsText, 80);
-    doc.text(splitTerms, 15, bottomY + 15);
-
-    // Right: Calculations
-    let calcY = bottomY + 10;
-    doc.setFont('Helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor('#4B5563');
-    doc.text('SUBTOTAL:', 125, calcY);
-    doc.setFont('Helvetica', 'bold');
-    doc.text(`INR ${subtotal.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
+    pdf.setTextColor(52, 211, 153);
+    pdf.text('Total Advance Adjusted:', 114, y + 17);
+    pdf.text(`-Rs. ${advanceTotal.toLocaleString('en-IN')}`, 190, y + 17, { align: 'right' });
 
     if (discount > 0) {
-      calcY += 6;
-      doc.setFont('Helvetica', 'normal');
-      doc.setTextColor('#EF4444');
-      doc.text('DISCOUNT:', 125, calcY);
-      doc.setFont('Helvetica', 'bold');
-      doc.text(`- INR ${discount.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
+      pdf.setTextColor(248, 113, 113);
+      pdf.text('Discount:', 114, y + 22);
+      pdf.text(`-Rs. ${discount.toLocaleString('en-IN')}`, 190, y + 22, { align: 'right' });
     }
 
-    if (includeGst) {
-      calcY += 6;
-      doc.setFont('Helvetica', 'normal');
-      doc.setTextColor('#4B5563');
-      doc.text('GST (18% Service):', 125, calcY);
-      doc.setFont('Helvetica', 'bold');
-      doc.text(`INR ${gstAmount.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
+    // Grand Total Pill
+    pdf.setFillColor(245, 158, 11);
+    pdf.roundedRect(112, y + 26, 80, 9, 2, 2, 'F');
+
+    pdf.setTextColor(15, 23, 42);
+    pdf.setFontSize(8.5);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('REMAINING BALANCE DUE:', 116, y + 32);
+    pdf.setFontSize(11);
+    pdf.text(`Rs. ${totalPayable.toLocaleString('en-IN')}`, 188, y + 32, { align: 'right' });
+
+    // Left Bank Details
+    pdf.setFillColor(254, 243, 199);
+    pdf.setDrawColor(252, 211, 77);
+    pdf.roundedRect(14, y, 88, 38, 2, 2, 'FD');
+
+    pdf.setTextColor(120, 53, 15);
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('BANK & UPI PAYMENT DETAILS:', 18, y + 6);
+
+    pdf.setTextColor(30, 41, 59);
+    pdf.setFontSize(7.5);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text(`Account Holder: ${accountHolder}`, 18, y + 12);
+    pdf.text(`Bank Name: ${bankName}`, 18, y + 17);
+    pdf.text(`A/C Number: ${accountNumber}`, 18, y + 22);
+    pdf.text(`IFSC Code: ${ifscCode}`, 18, y + 27);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(180, 83, 9);
+    pdf.text(`UPI ID: ${upiId}`, 18, y + 32);
+
+    y += 44;
+
+    // Terms & Conditions Footer
+    pdf.setDrawColor(226, 232, 240);
+    pdf.line(14, y, 196, y);
+    y += 6;
+
+    pdf.setTextColor(100, 116, 139);
+    pdf.setFontSize(7.5);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('Terms: All files delivered via Google Drive upon settlement. Thank you for choosing The Frame Cuts Studio!', 14, y);
+
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(15, 23, 42);
+    pdf.text('Authorized Signatory — The Frame Cuts Studio', 196, y, { align: 'right' });
+
+    const pdfBlob = pdf.output('blob');
+    const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+    return { pdf, fileName, file };
+  };
+
+  const generatePdfFile = async (): Promise<{ pdf: jsPDF; fileName: string; file: File } | null> => {
+    const element = printInvoiceRef.current;
+    if (!element) return generateVectorPdfDirect();
+
+    // Temporarily bring container on-screen so html2canvas computes accurate bounding rect & full render
+    const parentContainer = element.parentElement;
+    const origPosition = parentContainer ? parentContainer.style.position : '';
+    const origLeft = parentContainer ? parentContainer.style.left : '';
+    const origTop = parentContainer ? parentContainer.style.top : '';
+    const origZIndex = parentContainer ? parentContainer.style.zIndex : '';
+    const origOpacity = parentContainer ? parentContainer.style.opacity : '';
+    const origVisibility = parentContainer ? parentContainer.style.visibility : '';
+
+    if (parentContainer) {
+      parentContainer.style.position = 'fixed';
+      parentContainer.style.left = '0px';
+      parentContainer.style.top = '0px';
+      parentContainer.style.zIndex = '99999';
+      parentContainer.style.opacity = '1';
+      parentContainer.style.visibility = 'visible';
     }
 
-    // Total Value
-    calcY += 6;
-    doc.setFont('Helvetica', 'normal');
-    doc.setTextColor('#4B5563');
-    doc.text('TOTAL VALUE:', 125, calcY);
-    doc.setFont('Helvetica', 'bold');
-    doc.text(`INR ${totalAmount.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
+    try {
+      // Small pause to let DOM recalculate styles & layout
+      await new Promise(resolve => setTimeout(resolve, 80));
 
-    if (totalPaymentsReceived > 0) {
-      calcY += 6;
-      doc.setFont('Helvetica', 'normal');
-      doc.setTextColor('#047857');
-      doc.text('TOTAL PAID:', 125, calcY);
-      doc.setFont('Helvetica', 'bold');
-      doc.text(`- INR ${totalPaymentsReceived.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
-    }
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 800,
+        windowHeight: element.scrollHeight || 1120,
+        onclone: (clonedDoc) => {
+          const clonedTarget = clonedDoc.querySelector('#printable-invoice-container') as HTMLElement;
+          if (clonedTarget) {
+            clonedTarget.style.opacity = '1';
+            clonedTarget.style.visibility = 'visible';
+            clonedTarget.style.display = 'block';
+            clonedTarget.style.position = 'relative';
+            clonedTarget.style.top = '0';
+            clonedTarget.style.left = '0';
+            clonedTarget.style.margin = '0';
+          }
+        }
+      });
 
-    // Total Due
-    calcY += 8;
-    doc.setFillColor(fillBgColor); // Soft champagne cream
-    doc.rect(122, calcY - 5, 73, 8, 'F');
-    doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor('#111827');
-    doc.text('BALANCE DUE:', 125, calcY);
-    doc.setFont('Helvetica', 'extrabold');
-    doc.text(`INR ${balanceDue.toLocaleString('en-IN')}`, 192, calcY, { align: 'right' });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({
+        orientation: 'p',
+        unit: 'mm',
+        format: 'a4'
+      });
 
-    // Capture and embed payment QR Code inside the PDF
-    const qrCanvas = document.getElementById('invoice-qr-canvas') as HTMLCanvasElement | null;
-    const qrImage = qrCanvas ? qrCanvas.toDataURL('image/png') : null;
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
 
-    if (qrImage) {
-      const qrBoxY = calcY + 5;
-      const qrBoxHeight = 35;
-      
-      // Ensure we don't overlap the page footer signature block
-      if (qrBoxY + qrBoxHeight < 240) {
-        // Draw background box for QR Code section in soft champagne/cream
-        doc.setFillColor('#FAF7F0');
-        doc.roundedRect(122, qrBoxY, 73, qrBoxHeight, 3, 3, 'F');
-        
-        // Draw gold border
-        doc.setDrawColor(197, 160, 89);
-        doc.setLineWidth(0.25);
-        doc.roundedRect(122, qrBoxY, 73, qrBoxHeight, 3, 3, 'D');
-        
-        // Draw QR Image
-        doc.addImage(qrImage, 'PNG', 124, qrBoxY + 3, 29, 29);
-        
-        // Draw Text next to QR Image inside the box
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(7);
-        doc.setTextColor('#C5A059');
-        const headerText = qrType === 'upi' ? 'UPI INSTANT SETTLEMENT' : 'DIRECT PAYMENT LINK';
-        doc.text(headerText, 156, qrBoxY + 8);
-        
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.setTextColor('#111827');
-        const actionText = qrType === 'upi' ? 'Scan to Pay Balance' : 'Scan to Open Link';
-        doc.text(actionText, 156, qrBoxY + 13);
-        
-        doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(6.5);
-        doc.setTextColor('#6B7280');
-        const detailText = qrType === 'upi' ? `UPI: ${upiId}` : (paymentLink.length > 25 ? paymentLink.substring(0, 22) + '...' : paymentLink);
-        doc.text(detailText, 156, qrBoxY + 18);
-        
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(7);
-        doc.setTextColor('#10B981');
-        const balanceText = qrType === 'upi' ? `Pre-filled: INR ${balanceDue.toLocaleString('en-IN')}` : 'Online Cards Accepted';
-        doc.text(balanceText, 156, qrBoxY + 24);
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      const cleanStudioName = currentStudio?.name ? currentStudio.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Studio';
+      const fileName = `Invoice_${invoiceNo}_${cleanStudioName}.pdf`;
+
+      const pdfBlob = pdf.output('blob');
+      const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+      return { pdf, fileName, file };
+    } catch (err) {
+      console.warn('html2canvas rendering warning, generating direct vector PDF fallback:', err);
+      return generateVectorPdfDirect();
+    } finally {
+      // Restore off-screen placement
+      if (parentContainer) {
+        parentContainer.style.position = origPosition || 'fixed';
+        parentContainer.style.left = origLeft || '-9999px';
+        parentContainer.style.top = origTop || '0px';
+        parentContainer.style.zIndex = origZIndex || '-9999';
+        parentContainer.style.opacity = origOpacity || '1';
+        parentContainer.style.visibility = origVisibility || 'visible';
       }
     }
-
-    // Draw final page footer with signature block
-    drawFooterOnPage(doc, currentPageNum, true);
-
-    // Save/Download the PDF
-    const filename = `${invoiceId}-${currentStudio.name.replace(/\s+/g, '_')}.pdf`;
-    doc.save(filename);
-    return filename;
   };
 
-  const handleShareWhatsApp = () => {
-    if (!currentStudio) return;
-
-    let pdfFilename = '';
+  const handleGeneratePDF = async () => {
+    setIsGeneratingPdf(true);
     try {
-      pdfFilename = handleExportPDF();
+      const res = await generatePdfFile();
+      if (!res) {
+        window.print();
+        showToast('Print dialog opened!');
+        return;
+      }
+      res.pdf.save(res.fileName);
+      showToast('📄 PDF Invoice generated & downloaded successfully!');
     } catch (err) {
-      console.error('PDF generation failed:', err);
+      console.error('PDF Generation Error, using fallback:', err);
+      const fallback = generateVectorPdfDirect();
+      fallback.pdf.save(fallback.fileName);
+      showToast('📄 PDF Invoice generated successfully!');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  const handleGenerateAndAttachPDF = async () => {
+    setIsGeneratingPdf(true);
+    try {
+      let res = await generatePdfFile();
+      if (!res) {
+        res = generateVectorPdfDirect();
+      }
+
+      const cleanStudioName = currentStudio?.name ? currentStudio.name.replace(/[^a-zA-Z0-9]/g, '_') : 'Studio';
+      const fileName = res.fileName || `Invoice_${invoiceNo}_${cleanStudioName}.pdf`;
+      const pdfDataUrl = res.pdf.output('datauristring');
+      const docPath = `firestore://studioInvoices/${invoiceNo}/${fileName}`;
+
+      const payload = {
+        id: invoiceNo,
+        invoiceNo,
+        studioId: selectedStudioId,
+        studioName: currentStudio?.name || '',
+        invoiceDate,
+        projectTotal: selectedProjectsTotal,
+        advanceTotal,
+        previousBalance,
+        discount,
+        totalPayable,
+        driveLink,
+        notes,
+        pdfDocumentPath: docPath,
+        pdfFileName: fileName,
+        pdfDataUrl: pdfDataUrl,
+        selectedProjectsCount: studioProjects.filter(p => selectedProjectIds[p.id]).length,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (onSaveInvoiceDraft) {
+        await onSaveInvoiceDraft(payload);
+      } else {
+        const docRef = doc(db, 'studioInvoices', invoiceNo);
+        await setDoc(docRef, payload, { merge: true });
+      }
+
+      setAttachedPdfPath(docPath);
+      res.pdf.save(fileName);
+      showToast('📄 PDF generated & saved in Firestore! Download started.');
+    } catch (err) {
+      console.error('Error generating and attaching PDF:', err);
+      showToast('⚠️ Error creating PDF attachment');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  const handleWhatsAppSend = async () => {
+    setIsGeneratingPdf(true);
+    try {
+      const res = await generatePdfFile();
+      const rawMsg = decodeURIComponent(getWhatsAppMessage());
+
+      // Auto-download PDF file to user's device so it is ready to attach
+      if (res) {
+        res.pdf.save(res.fileName);
+      }
+
+      let phone = currentStudio?.phone ? currentStudio.phone.replace(/\D/g, '') : '';
+      if (phone.length === 10) {
+        phone = '91' + phone;
+      }
+
+      // 1. Mobile Web Share API with File Attachment
+      if (res && navigator.canShare && navigator.canShare({ files: [res.file] })) {
+        try {
+          await navigator.share({
+            title: `Invoice ${invoiceNo}`,
+            text: rawMsg,
+            files: [res.file]
+          });
+          showToast('📲 Invoice PDF & details shared via WhatsApp!');
+          setIsGeneratingPdf(false);
+          return;
+        } catch (shareErr: any) {
+          if (shareErr.name === 'AbortError') {
+            showToast('Share cancelled');
+            setIsGeneratingPdf(false);
+            return;
+          }
+          console.warn('Native Web Share failed, using direct WhatsApp link:', shareErr);
+        }
+      }
+
+      // 2. Desktop / Standard WhatsApp Link Fallback
+      try {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(rawMsg);
+        }
+      } catch (e) {
+        console.warn('Clipboard write error', e);
+      }
+
+      const updatedMsg = rawMsg + `\n\n📎 *Invoice PDF file (${res?.fileName || 'Invoice.pdf'}) saved to your downloads.*`;
+      const encoded = encodeURIComponent(updatedMsg);
+
+      const link = phone ? `https://wa.me/${phone}?text=${encoded}` : `https://api.whatsapp.com/send?text=${encoded}`;
+      
+      const win = window.open(link, '_blank');
+      if (!win) {
+        window.location.href = link;
+      }
+      showToast('💬 PDF downloaded & opening WhatsApp! Simply attach the PDF in chat.');
+    } catch (err) {
+      console.error('WhatsApp PDF Error:', err);
+      const encoded = getWhatsAppMessage();
+      let phone = currentStudio?.phone ? currentStudio.phone.replace(/\D/g, '') : '';
+      if (phone.length === 10) {
+        phone = '91' + phone;
+      }
+      const link = phone ? `https://wa.me/${phone}?text=${encoded}` : `https://api.whatsapp.com/send?text=${encoded}`;
+      window.open(link, '_blank');
+      showToast('💬 Opening WhatsApp chat!');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  const handleEmailSend = async () => {
+    const subject = `Invoice ${invoiceNo} - ${currentStudio?.name || 'The Frame Cuts Studio'}`;
+    const body = decodeURIComponent(getWhatsAppMessage());
+
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`);
+      }
+    } catch (e) {
+      console.warn('Clipboard write error', e);
     }
 
-    const msg = `*THE FRAME CUT STUDIO OS - CONSOLIDATED LEDGER*%0A%0AInvoice ID: *${invoiceId}*%0APartner Studio: *${currentStudio.name}*%0ATotal Projects: *${studioProjects.length}*%0A%0A*Billing Summary:*%0AContract Value: ₹${subtotal.toLocaleString('en-IN')}%0A*Total Value (incl. GST): ₹${totalAmount.toLocaleString('en-IN')}*%0A*Total Paid: ₹${totalPaymentsReceived.toLocaleString('en-IN')}*%0A*Outstanding Balance Due: ₹${balanceDue.toLocaleString('en-IN')}*%0A%0A📥 _Consolidated invoice statement PDF (${pdfFilename || 'Studio_Statement.pdf'}) has been generated and saved._%0A%0APlease clear outstanding balance before final master transfers. Thank you!`;
-    window.open(`https://api.whatsapp.com/send?text=${msg}`, '_blank');
-    triggerToast("PDF Export & WhatsApp", "Consolidated invoice PDF downloaded and shared via WhatsApp!");
+    const mailtoUrl = `mailto:${currentStudio?.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailtoUrl;
+    showToast('✉️ Email text copied & opening mail app!');
   };
 
-  const handleShareEmail = () => {
-    if (!currentStudio) return;
-    const subject = `Consolidated Wedding Post-Production Statement: ${invoiceId} - ${currentStudio.name}`;
-    const body = `Dear ${currentStudio.ownerName || 'Partner'},\n\nPlease find the outstanding consolidated invoice statement for your studio.\n\nTotal Projects: ${studioProjects.length}\nTotal Budget Value: INR ${subtotal.toLocaleString('en-IN')}\nTotal Invoice Value (incl. GST): INR ${totalAmount.toLocaleString('en-IN')}\nTotal Payments Cleared: INR ${totalPaymentsReceived.toLocaleString('en-IN')}\nOutstanding Balance Due: INR ${balanceDue.toLocaleString('en-IN')}\n\nPlease clear the balance due to proceed with master video downloads.\n\nBest regards,\nSatish Tiwari\nThe Frame Cut Studio OS`;
-    window.open(`mailto:${currentStudio.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+  const handlePrint = () => {
+    window.print();
+    showToast('🖨️ Print dialog opened!');
   };
 
-  const handleSimulateEmailNotification = () => {
-    if (!currentStudio) return;
-    
-    setShowSimulationModal(true);
-    setIsSimulatingEmail(true);
-    setSimulationStep(1);
-    setSimulationLogs(['[System] Initializing secure invoice dispatch module...']);
-
-    // Step 1: Generate invoice link
-    setTimeout(() => {
-      const link = `https://theframecutstudio.web.app/public/invoice/${invoiceId}`;
-      setSimulationStep(2);
-      setSimulationLogs(prev => [
-        ...prev,
-        `[LinkGen] Generated secure client payment link: ${link}`,
-        `[System] Composing automated notification dispatch for studio "${currentStudio.name}"...`
-      ]);
-    }, 1200);
-
-    // Step 2: Establish connection
-    setTimeout(() => {
-      setSimulationStep(3);
-      setSimulationLogs(prev => [
-        ...prev,
-        `[MailRelay] Connecting to SMTP mail dispatch relay...`,
-        `[MailRelay] Secure handshake established with client email server: ${currentStudio.email || 'info@alliedstudio.com'}`
-      ]);
-    }, 2500);
-
-    // Step 3: Send
-    setTimeout(() => {
-      setSimulationStep(4);
-      setSimulationLogs(prev => [
-        ...prev,
-        `[SMTP] Sending message: "Wedding Post-Production Invoice: ${invoiceId} - ${currentStudio.name}"`,
-        `[SMTP] Delivery status: DELIVERED (250 OK Response)`
-      ]);
-    }, 4000);
-
-    // Step 4: Finish
-    setTimeout(() => {
-      setSimulationStep(5);
-      setIsSimulatingEmail(false);
-      setSimulationLogs(prev => [
-        ...prev,
-        `[System] Notification audit logged. Email dispatched successfully to ${currentStudio.email || 'info@alliedstudio.com'}!`
-      ]);
-    }, 5200);
-  };
-
-  const handleRegisterInvoice = async () => {
-    if (!currentStudio) return;
-    
-    const dbBalanceDue = Math.max(0, totalAmount - totalPaymentsReceived);
-
-    await onAddInvoice({
-      projectId: 'CONSOLIDATED',
-      coupleName: `Consolidated - ${studioProjects.length} Projects`,
-      studioId: currentStudio.id,
-      studioName: currentStudio.name,
-      invoiceDate: new Date().toISOString().split('T')[0],
-      dueDate: 'Upon Delivery',
-      subtotal,
-      gstAmount,
-      discount,
-      totalAmount,
-      amountPaid: totalPaymentsReceived,
-      balanceDue: dbBalanceDue,
-      gstNumber: currentStudio.gstNumber || undefined,
-      status: dbBalanceDue <= 0 ? 'paid' : 'sent'
-    });
-
-    triggerToast("Invoice Saved", "Consolidated studio invoice registered in company ledger!");
+  const handleSaveDraft = async () => {
+    if (onSaveInvoiceDraft) {
+      await onSaveInvoiceDraft({
+        invoiceNo,
+        studioId: selectedStudioId,
+        studioName: currentStudio?.name,
+        date: invoiceDate,
+        projectTotal: selectedProjectsTotal,
+        advanceTotal,
+        previousBalance,
+        discount,
+        totalPayable,
+        driveLink,
+        notes
+      });
+    }
+    setSaveSuccess(true);
+    showToast('💾 Draft Saved to Database!');
+    setTimeout(() => setSaveSuccess(false), 3000);
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20 max-w-7xl mx-auto px-2 sm:px-4 print:p-0 print:m-0">
       
-      {/* Top selection bar */}
-      <div className="p-6 rounded-3xl glass-panel relative print:hidden space-y-5">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
-          <div className="md:col-span-2">
-            <label className="block text-[10px] font-mono text-gray-400 uppercase mb-1.5">Select Studio Partner</label>
+      {/* ================= INVOICE VIEW TOP NAVIGATION TABS ================= */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900 border border-slate-800 p-2.5 rounded-2xl print:hidden shadow-xl">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveInvoiceTab('builder')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+              activeInvoiceTab === 'builder'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Invoice Builder</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveInvoiceTab('templates')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+              activeInvoiceTab === 'templates'
+                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>WhatsApp Template Settings</span>
+            <span className="text-[10px] font-extrabold bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/40 ml-1">
+              Custom
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveInvoiceTab('history')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+              activeInvoiceTab === 'history'
+                ? 'bg-blue-500 text-slate-950 shadow-md shadow-blue-500/20'
+                : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <FileCheck className="w-4 h-4" />
+            <span>Saved Invoices ({invoices.length})</span>
+          </button>
+        </div>
+
+        {activeInvoiceTab === 'builder' && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/90 border border-slate-700/80 rounded-xl">
+            <span className="text-xs text-slate-400 font-medium hidden sm:inline">Active WA Stage:</span>
             <select
-              id="invoice-studio-select"
-              value={selectedStudioId}
-              onChange={(e) => setSelectedStudioId(e.target.value)}
-              className="w-full bg-charcoal-900 border border-luxury-green-800/30 rounded-2xl p-3 text-xs text-gray-300 focus:outline-none focus:border-gold-500/40"
+              value={selectedStage}
+              onChange={(e) => setSelectedStage(e.target.value)}
+              className="bg-slate-900 text-emerald-400 font-bold text-xs border border-emerald-500/30 rounded-lg px-2.5 py-1.5 focus:ring-1 focus:ring-emerald-500 outline-none cursor-pointer"
             >
-              {studios.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.name} ({projects.filter(p => p.studioId === s.id).length} Projects)
-                </option>
-              ))}
+              <option value="billing">📋 Stage 1: Tax Invoice & Billing</option>
+              <option value="reminder">🔔 Stage 2: Payment Reminder</option>
+              <option value="partial_advance">💳 Stage 3: Advance Receipt</option>
+              <option value="paid_settled">✅ Stage 4: Paid Settlement</option>
             </select>
           </div>
-
-          <div>
-            <label className="block text-[10px] font-mono text-gray-400 uppercase mb-1.5">Discount Override (INR)</label>
-            <input
-              type="number"
-              value={discount}
-              onChange={(e) => setDiscount(Number(e.target.value))}
-              className="w-full bg-charcoal-900 border border-luxury-green-800/30 rounded-2xl p-3 text-xs text-white focus:outline-none"
-            />
-          </div>
-
-          <div className="flex items-center space-x-3 mt-4 md:mt-0">
-            <input
-              type="checkbox"
-              id="gst-toggle"
-              checked={includeGst}
-              onChange={(e) => setIncludeGst(e.target.checked)}
-              className="w-4.5 h-4.5 rounded text-gold-500 focus:ring-0 bg-charcoal-900 border-luxury-green-800"
-            />
-            <label htmlFor="gst-toggle" className="text-xs text-gray-300 font-medium cursor-pointer">
-              Apply 18% GST (Service Tax)
-            </label>
-          </div>
-        </div>
-
-        {/* Dynamic Billing QR Configuration Row */}
-        <div className="border-t border-white/5 pt-4">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-            <div className="md:col-span-3 text-left">
-              <span className="text-[10px] font-mono text-gold-400 uppercase tracking-wider block font-bold">Dynamic Payment QR Code</span>
-              <span className="text-[9px] text-gray-400 leading-normal block mt-1">Configure UPI/Payment link on-the-fly to embed in client invoice.</span>
-            </div>
-
-            <div className="md:col-span-3">
-              <label className="block text-[9px] font-mono text-gray-400 uppercase mb-1">Active QR Mode</label>
-              <div className="flex space-x-1.5 p-1 bg-black/40 rounded-xl border border-white/5">
-                <button
-                  type="button"
-                  onClick={() => setQrType('upi')}
-                  className={`flex-1 text-[9px] font-mono py-1 rounded-lg text-center font-bold transition-all cursor-pointer ${
-                    qrType === 'upi' ? 'bg-[#d4af37]/15 text-gold-400 border border-gold-500/20' : 'text-gray-400 hover:text-white border border-transparent'
-                  }`}
-                >
-                  UPI Pay
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setQrType('link')}
-                  className={`flex-1 text-[9px] font-mono py-1 rounded-lg text-center font-bold transition-all cursor-pointer ${
-                    qrType === 'link' ? 'bg-[#d4af37]/15 text-gold-400 border border-gold-500/20' : 'text-gray-400 hover:text-white border border-transparent'
-                  }`}
-                >
-                  Direct Link
-                </button>
-              </div>
-            </div>
-
-            <div className="md:col-span-3">
-              <label className="block text-[9px] font-mono text-gray-400 uppercase mb-1">
-                {qrType === 'upi' ? 'UPI ID (Amount Pre-filled)' : 'Web Gateway URL'}
-              </label>
-              <input
-                type="text"
-                value={qrType === 'upi' ? upiId : paymentLink}
-                onChange={(e) => {
-                  if (qrType === 'upi') {
-                    setUpiId(e.target.value);
-                  } else {
-                    setPaymentLink(e.target.value);
-                  }
-                }}
-                placeholder={qrType === 'upi' ? 'e.g. sateeshtiwari@okaxis' : 'e.g. https://razorpay.me/@studio'}
-                className="w-full bg-charcoal-900 border border-luxury-green-800/20 rounded-xl px-3 py-1.5 text-[10px] text-white focus:outline-none placeholder-gray-600 font-mono"
-              />
-            </div>
-
-            <div className="md:col-span-3 flex items-center space-x-2">
-              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span className="text-[10px] text-gray-300 font-mono leading-relaxed">
-                {qrData ? 'QR Embedded Successfully' : 'No Payment Configured'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Payments Received Management Section */}
-        <div className="border-t border-white/5 pt-4">
-          <div className="flex justify-between items-center cursor-pointer" onClick={() => setShowPaymentsManager(!showPaymentsManager)}>
-            <div className="flex items-center space-x-2">
-              <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center text-[10px] font-bold font-mono">₹</span>
-              <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider font-bold">Payments Received Ledger ({receivedPayments.length} payments, Total: ₹{totalPaymentsReceived.toLocaleString('en-IN')})</span>
-            </div>
-            <span className="text-gray-400 text-xs font-mono">{showPaymentsManager ? 'Hide ▴' : 'Show ▾'}</span>
-          </div>
-
-          {showPaymentsManager && (
-            <div className="mt-4 bg-black/20 rounded-2xl border border-white/5 p-4 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                <div>
-                  <label className="block text-[9px] font-mono text-gray-400 uppercase mb-1">Received From (Person Name)</label>
-                  <input
-                    type="text"
-                    value={newPaymentFrom}
-                    onChange={(e) => setNewPaymentFrom(e.target.value)}
-                    placeholder="e.g. Bunty Bhaiya"
-                    className="w-full bg-charcoal-900 border border-luxury-green-800/20 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none placeholder-gray-600 font-sans"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[9px] font-mono text-gray-400 uppercase mb-1">Amount Paid (₹)</label>
-                  <input
-                    type="number"
-                    value={newPaymentAmount || ''}
-                    onChange={(e) => setNewPaymentAmount(Number(e.target.value))}
-                    placeholder="e.g. 25000"
-                    className="w-full bg-charcoal-900 border border-luxury-green-800/20 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none placeholder-gray-600 font-mono"
-                  />
-                </div>
-                <div>
-                  <button
-                    type="button"
-                    onClick={handleAddPayment}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] transition-all text-white font-mono font-bold text-[10px] uppercase tracking-wider py-2 px-4 rounded-xl cursor-pointer"
-                  >
-                    + Add Payment
-                  </button>
-                </div>
-              </div>
-
-              {/* Payments List Table */}
-              <div className="max-h-60 overflow-y-auto divide-y divide-white/5 pr-1 border-t border-white/5 pt-2">
-                {receivedPayments.length > 0 ? (
-                  receivedPayments.map((p) => (
-                    <div key={p.id} className="flex justify-between items-center py-2 text-xs">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-emerald-500 font-bold">✓</span>
-                        <span className="text-gray-300 font-medium">{p.receivedFrom}</span>
-                      </div>
-                      <div className="flex items-center space-x-3">
-                        <span className="font-mono text-emerald-400 font-bold">₹{p.amount.toLocaleString('en-IN')}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemovePayment(p.id)}
-                          className="text-red-400 hover:text-red-300 transition-colors p-1"
-                          title="Delete Payment"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-[10px] font-mono text-gray-500 py-2">No payments received registered yet for this invoice.</p>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
-      {/* Invoice Receipt Layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        
-        {/* Printable Invoice Page */}
-        <div className="xl:col-span-2 p-10 rounded-[32px] bg-gradient-to-b from-[#FCFBF7] to-[#FAF6EE] text-charcoal-950 shadow-[0_24px_70px_-12px_rgba(197,160,89,0.12)] relative border border-gold-500/20 max-w-3xl mx-auto w-full min-h-[820px] flex flex-col justify-between overflow-hidden print:overflow-visible print:h-auto print:min-h-0 print:border-0 print:shadow-none print:p-0 printable-invoice-container">
-          
-          {/* Delicate Inset Gold Double Frame for Luxury Aesthetic */}
-          <div className="absolute inset-4 rounded-[24px] border border-gold-500/10 pointer-events-none select-none z-0 print:hidden" />
-          
-          {/* Watermark Background Logo (6% Transparency) */}
-          <div className="absolute inset-0 flex items-center justify-center opacity-[0.06] pointer-events-none select-none z-0 print:hidden">
-            <Logo size={360} variant="gold" className="transform -rotate-12 scale-110" />
-          </div>
-
-          {/* Repeating Watermark across printed pages (position: fixed is respected by browsers in print) */}
-          <div className="hidden print:flex fixed inset-0 items-center justify-center pointer-events-none z-0 select-none overflow-hidden print-watermark-wrapper" style={{ position: 'fixed', zIndex: 0 }}>
-            <div className="text-center transform -rotate-[35deg] scale-110 opacity-[0.04]">
-              <Logo size={420} variant="gold" className="mx-auto mb-2" />
-              <div className="font-display font-black tracking-[0.25em] text-gold-600 text-5xl leading-none">THE FRAME CUT</div>
-              <div className="font-mono tracking-[0.4em] text-gold-500 text-xs mt-3 uppercase font-semibold">CONFIDENTIAL STATEMENT</div>
-            </div>
-          </div>
-
-          <div className="relative z-10 flex flex-col justify-between h-full flex-1 px-4 py-2 print:block print:h-auto print:min-h-0">
+      {activeInvoiceTab === 'history' ? (
+        /* ================= SAVED INVOICES HISTORY VIEW ================= */
+        <div className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              {/* Invoice Top Brand Header */}
-              <div className="flex justify-between items-start border-b border-gold-500/10 pb-6 invoice-header break-inside-avoid page-break-inside-avoid">
-                <div>
-                  <div className="flex items-center space-x-3">
-                    <Logo size={36} variant="gold" className="shrink-0" />
-                    <div>
-                      <span className="text-2xl font-light font-display tracking-[0.2em] text-stone-900 uppercase block leading-none">THE FRAME CUT</span>
-                      <p className="text-[7.5px] font-mono text-gold-600 tracking-[0.25em] mt-2 uppercase">Cinematic Video Post-Production Suites</p>
-                    </div>
-                  </div>
-                  
-                  <div className="text-[10px] text-stone-500 mt-6 font-mono leading-relaxed space-y-0.5">
-                    <p className="font-bold text-stone-700">Satish Tiwari, Managing Admin</p>
-                    <p>Mumbai, Maharashtra, India</p>
-                    <p className="text-gold-700">satish@framecut.com | +91 98333 44455</p>
-                  </div>
-                </div>
-
-                <div className="text-right flex flex-col items-end">
-                  <div className="bg-gold-500/10 text-gold-700 px-3 py-1 rounded-full text-[9px] font-mono tracking-widest uppercase mb-3">
-                    OFFICIAL STATEMENT
-                  </div>
-                  <h1 className="text-3xl font-light tracking-[0.1em] text-stone-900 font-display uppercase">INVOICE</h1>
-                  <p className="text-xs text-stone-600 font-mono mt-1 font-semibold tracking-wider">{invoiceId}</p>
-                  
-                  <div className="text-[10px] text-stone-500 mt-6 font-mono space-y-0.5">
-                    <p><span className="text-stone-400">DATE:</span> {new Date().toISOString().split('T')[0]}</p>
-                    <p><span className="text-stone-400">TERMS:</span> Due on Delivery</p>
-                  </div>
-                </div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                  Firestore Registry
+                </span>
+                <span className="text-xs text-slate-400 font-medium">• {invoices.length} Total Saved</span>
               </div>
+              <h2 className="text-2xl font-black text-white flex items-center gap-2">
+                <FileCheck className="w-6 h-6 text-blue-400" />
+                Saved Invoices & Generated PDFs
+              </h2>
+              <p className="text-slate-400 text-sm mt-1">
+                View all generated invoices stored in your studio database. Re-download PDF files or dispatch updates directly.
+              </p>
+            </div>
 
-              {/* Client and Partner specs */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-6 border-b border-gold-500/10 text-xs invoice-client-info break-inside-avoid page-break-inside-avoid">
-                <div className="space-y-2">
-                  <h3 className="font-mono text-gold-600 uppercase tracking-[0.2em] text-[9px] font-semibold">BILLED TO PARTNER</h3>
-                  <div className="space-y-1">
-                    <h4 className="font-bold text-stone-900 text-sm tracking-wide">{currentStudio?.name}</h4>
-                    <p className="text-stone-600 leading-relaxed">
-                      Owner: {currentStudio?.ownerName || 'Billed Studio Partner'}<br />
-                      {currentStudio?.address || 'India'}<br />
-                      {currentStudio?.phone || ''}
-                    </p>
-                  </div>
-                  {currentStudio?.gstNumber && (
-                    <div className="inline-block bg-stone-100 text-stone-600 px-2 py-0.5 rounded font-mono text-[9px] mt-1">
-                      GSTIN: {currentStudio.gstNumber}
-                    </div>
-                  )}
-                </div>
+            <button
+              onClick={() => setActiveInvoiceTab('builder')}
+              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs sm:text-sm rounded-xl shadow-lg transition-all cursor-pointer flex items-center gap-2 self-start md:self-auto"
+            >
+              <Plus className="w-4 h-4" />
+              Create New Invoice
+            </button>
+          </div>
 
-                <div className="flex flex-col items-start md:items-end justify-center pr-2">
-                  <h3 className="font-mono text-stone-400 uppercase tracking-wider text-[9px] mb-2 self-start md:self-end">SERVICE PROVIDER</h3>
-                  <div className="bg-gradient-to-br from-stone-900 via-[#1C1917] to-stone-950 p-4 rounded-2xl border border-gold-500/20 flex items-center space-x-3.5 w-fit shadow-lg">
-                    <Logo size={46} variant="gold" />
-                    <div>
-                      <h4 className="font-bold text-gold-400 text-xs tracking-[0.15em] uppercase">THE FRAME CUT</h4>
-                      <p className="text-[8px] text-stone-400 font-mono tracking-widest uppercase mt-0.5">STUDIO MASTER</p>
-                    </div>
-                  </div>
-                </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl">
+            {invoices.length === 0 ? (
+              <div className="text-center py-12 text-slate-500 text-sm space-y-3">
+                <FileText className="w-12 h-12 text-slate-600 mx-auto" />
+                <p>No saved invoices found in database yet.</p>
+                <button
+                  onClick={() => setActiveInvoiceTab('builder')}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 font-semibold text-xs rounded-xl border border-slate-700"
+                >
+                  Generate Your First Invoice
+                </button>
               </div>
-
-              {/* Line Items Table */}
-              <div className="overflow-x-auto my-8 print:overflow-visible">
-                <table className="w-full text-left text-xs border-collapse">
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm text-slate-300 border-collapse">
                   <thead>
-                    <tr className="border-b border-gold-500/15 text-[9px] font-mono text-stone-400 uppercase tracking-wider">
-                      <th className="py-3 pl-2 font-semibold">Wedding Project / Details</th>
-                      <th className="py-3 pl-4 font-semibold">Cinematic Deliverables</th>
-                      <th className="py-3 text-right pr-4 font-semibold">Budget</th>
+                    <tr className="bg-slate-800/80 border-b border-slate-700 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      <th className="p-3">Invoice No</th>
+                      <th className="p-3">Studio Name</th>
+                      <th className="p-3">Date</th>
+                      <th className="p-3 text-right">Project Total</th>
+                      <th className="p-3 text-right">Advance</th>
+                      <th className="p-3 text-right">Net Payable</th>
+                      <th className="p-3 text-center">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gold-500/5 font-sans text-stone-700">
-                    {studioProjects.length > 0 ? (
-                      studioProjects.map((p) => (
-                        <tr key={p.id} className="hover:bg-gold-500/[0.01] transition-colors break-inside-avoid page-break-inside-avoid">
-                          <td className="py-4 pl-2">
-                            <span className="font-bold text-stone-900 text-sm block tracking-wide">{p.coupleName}</span>
-                            <span className="block text-[10px] text-stone-400 mt-1 font-medium">Shoot: {p.shootDate}</span>
-                          </td>
-                          <td className="py-4 pl-4 text-stone-600 max-w-[280px] break-words">
-                            <span className="text-[11px] leading-relaxed font-medium block">
-                              {p.eventType ? p.eventType.replace(/, /g, ' + ') : 'Wedding Film'}
-                            </span>
-                          </td>
-                          <td className="py-4 text-right font-mono font-bold text-stone-900 text-sm pr-4">₹{p.projectAmount.toLocaleString('en-IN')}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={4} className="py-8 text-center text-stone-400 font-mono text-[10px]">
-                          No active wedding projects found in company registry for this partner.
+                  <tbody className="divide-y divide-slate-800/60">
+                    {invoices.map((inv) => (
+                      <tr key={inv.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="p-3 font-mono font-bold text-amber-400">{inv.invoiceNo || inv.id}</td>
+                        <td className="p-3 font-semibold text-white">{inv.studioName || 'Studio'}</td>
+                        <td className="p-3 text-slate-400 text-xs">{inv.invoiceDate || inv.date || 'Today'}</td>
+                        <td className="p-3 text-right font-medium text-slate-200">₹{(inv.projectTotal || 0).toLocaleString('en-IN')}</td>
+                        <td className="p-3 text-right font-medium text-emerald-400">-₹{(inv.advanceTotal || 0).toLocaleString('en-IN')}</td>
+                        <td className="p-3 text-right font-black text-amber-400 text-base">₹{(inv.totalPayable || 0).toLocaleString('en-IN')}</td>
+                        <td className="p-3 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => {
+                                setInvoiceNo(inv.invoiceNo || inv.id);
+                                if (inv.studioId) setSelectedStudioId(inv.studioId);
+                                setActiveInvoiceTab('builder');
+                                handleGeneratePDF();
+                              }}
+                              className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 font-semibold text-xs rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer"
+                              title="Download PDF"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              PDF
+                            </button>
+
+                            {onDeleteInvoiceDraft && (
+                              <button
+                                onClick={() => onDeleteInvoiceDraft(inv.id)}
+                                className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 cursor-pointer transition-colors"
+                                title="Delete invoice"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
-                    )}
+                    ))}
                   </tbody>
                 </table>
               </div>
-
-              {/* Payments Received History Section */}
-              {receivedPayments.length > 0 && (
-                <div className="mt-8 pt-6 border-t border-gold-500/10 break-inside-avoid page-break-inside-avoid">
-                  <h4 className="font-mono text-stone-500 uppercase tracking-widest text-[9px] mb-3 flex items-center space-x-1.5 font-bold">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                    <span>PAYMENTS RECEIVED HISTORY</span>
-                  </h4>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="border-b border-gold-500/10 text-[8px] font-mono text-stone-400 uppercase tracking-wider">
-                          <th className="py-2 pl-2 font-semibold">Receipt ID</th>
-                          <th className="py-2 font-semibold">Received From</th>
-                          <th className="py-2 text-right pr-4 font-semibold">Amount Received</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gold-500/5 font-sans text-stone-600 text-xs">
-                        {receivedPayments.map((p, idx) => (
-                          <tr key={p.id} className="hover:bg-emerald-500/[0.01] transition-colors break-inside-avoid page-break-inside-avoid">
-                            <td className="py-2.5 pl-2 text-stone-400 font-mono text-[9px]">PAY-RCV-{(idx+1).toString().padStart(3, '0')}</td>
-                            <td className="py-2.5 font-medium text-stone-800">{p.receivedFrom}</td>
-                            <td className="py-2.5 text-right font-mono font-bold text-emerald-600 pr-4">₹{p.amount.toLocaleString('en-IN')}</td>
-                          </tr>
-                        ))}
-                        <tr className="bg-emerald-500/[0.02] font-semibold text-stone-900 border-t border-gold-500/10 break-inside-avoid page-break-inside-avoid">
-                          <td colSpan={2} className="py-2.5 pl-2 font-mono uppercase text-[9px] text-stone-500">Total Payments Cleared</td>
-                          <td className="py-2.5 text-right font-mono font-bold text-emerald-600 pr-4">₹{totalPaymentsReceived.toLocaleString('en-IN')}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
+            )}
+          </div>
+        </div>
+      ) : activeInvoiceTab === 'templates' ? (
+        /* ================= WHATSAPP TEMPLATE SETTINGS VIEW ================= */
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+              <MessageSquare className="w-48 h-48 text-emerald-400" />
             </div>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    WhatsApp Automation
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium">• Persistent Templates</span>
+                </div>
+                <h2 className="text-2xl font-black text-white flex items-center gap-2">
+                  <Sliders className="w-6 h-6 text-emerald-400" />
+                  Customizable WhatsApp Message Formats
+                </h2>
+                <p className="text-slate-400 text-sm mt-1 max-w-2xl">
+                  Configure pre-formatted WhatsApp message layouts for each invoice stage. Select dynamic placeholders to automatically insert client & payment variables when dispatching messages.
+                </p>
+              </div>
 
-            {/* Subtotal summary calculations block */}
-            <div className="border-t border-gold-500/10 pt-6 invoice-summary break-inside-avoid page-break-inside-avoid">
-              <div className="flex flex-col md:flex-row justify-between items-start gap-6">
-                <div className="flex-1 space-y-4 w-full">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
-                    <div className="text-[10px] font-mono text-stone-400 leading-relaxed space-y-1">
-                      <p className="font-bold text-stone-700 tracking-wider uppercase mb-1 flex items-center space-x-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-gold-500" />
-                        <span>TERMS & SETTLEMENTS</span>
-                      </p>
-                      <p>Consolidated ledger statement of active post-production. Please clear remaining balance dues for final raw assets delivery.</p>
-                    </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveInvoiceTab('builder')}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs sm:text-sm font-semibold rounded-xl border border-slate-700 transition-all cursor-pointer flex items-center gap-2"
+                >
+                  <FileText className="w-4 h-4 text-amber-400" />
+                  Return to Invoice Builder
+                </button>
+              </div>
+            </div>
+          </div>
 
-                    <div className="text-[9px] sm:text-[9.5px] font-mono text-stone-500 leading-relaxed space-y-0.5 bg-gold-500/[0.03] border border-gold-500/10 p-3 rounded-xl break-inside-avoid page-break-inside-avoid invoice-bank-details">
-                      <p className="font-bold text-stone-700 tracking-wider uppercase mb-1 flex items-center space-x-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        <span>BANK TRANSFER DETAILS</span>
-                      </p>
-                      <p><span className="text-stone-400 font-medium">Bank Name:</span> <span className="font-bold text-stone-800">ICICI BANK</span></p>
-                      <p><span className="text-stone-400 font-medium">Account Name:</span> <span className="font-bold text-stone-800">SATISH TIWARI</span></p>
-                      <p><span className="text-stone-400 font-medium">Account Number:</span> <span className="font-bold text-stone-800">390701503993</span></p>
-                      <p><span className="text-stone-400 font-medium">IFSC Code:</span> <span className="font-bold text-stone-800">ICIC0003907</span></p>
-                      <p><span className="text-stone-400 font-medium">Account Type:</span> <span className="font-bold text-stone-800">Savings</span></p>
-                      <p><span className="text-stone-400 font-medium">VPA (UPI ID):</span> <span className="font-bold text-[#C5A059]">{upiId || '7772999933@icici'}</span></p>
-                    </div>
+          {/* Stage Tab Selector Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {Object.keys(DEFAULT_INVOICE_WA_TEMPLATES).map((stageKey) => {
+              const tmpl = templates[stageKey] || DEFAULT_INVOICE_WA_TEMPLATES[stageKey];
+              const isSelected = editingStage === stageKey;
+              return (
+                <button
+                  key={stageKey}
+                  type="button"
+                  onClick={() => setEditingStage(stageKey)}
+                  className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative overflow-hidden ${
+                    isSelected
+                      ? 'bg-slate-800/90 border-emerald-500 shadow-lg shadow-emerald-500/10 ring-2 ring-emerald-500/40'
+                      : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
+                      tmpl.color === 'emerald' ? 'bg-emerald-500/20 text-emerald-400' :
+                      tmpl.color === 'amber' ? 'bg-amber-500/20 text-amber-400' :
+                      tmpl.color === 'blue' ? 'bg-blue-500/20 text-blue-400' :
+                      'bg-purple-500/20 text-purple-400'
+                    }`}>
+                      {tmpl.badge}
+                    </span>
+                    {isSelected && (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    )}
                   </div>
 
-                  {/* Dynamic QR Code Section */}
-                  {qrData ? (
-                    <div className="flex items-center space-x-4 bg-[#FAF7F0] border border-gold-500/15 p-3.5 rounded-2xl max-w-sm break-inside-avoid page-break-inside-avoid invoice-qr-block">
-                      <div className="p-1.5 bg-white border border-gold-500/20 rounded-xl shadow-inner shrink-0">
-                        <QRCodeSVG 
-                          value={qrData}
-                          size={80}
-                          bgColor="#FFFFFF"
-                          fgColor="#1C1917"
-                          level="M"
-                          includeMargin={false}
-                        />
-                        {/* Hidden canvas for high-resolution PDF export */}
-                        <div style={{ display: 'none' }}>
-                          <QRCodeCanvas
-                            id="invoice-qr-canvas"
-                            value={qrData}
-                            size={250}
-                            bgColor="#FFFFFF"
-                            fgColor="#1C1917"
-                            level="M"
-                            includeMargin={false}
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="font-mono text-gold-600 font-bold uppercase tracking-wider text-[8px]">
-                          {qrType === 'upi' ? 'UPI INSTANT SETTLEMENT' : 'DIRECT PAYMENT LINK'}
-                        </p>
-                        <p className="font-display font-black text-stone-900 text-xs tracking-tight">
-                          {qrType === 'upi' ? 'Scan to Pay Balance' : 'Scan to Open Link'}
-                        </p>
-                        <p className="font-mono text-[8px] text-stone-500 break-all leading-normal max-w-[190px]">
-                          {qrType === 'upi' ? `ID: ${upiId}` : paymentLink}
-                        </p>
-                        <p className="font-sans font-semibold text-[8px] text-emerald-600">
-                          {qrType === 'upi' ? `Pre-filled: ₹${balanceDue.toLocaleString('en-IN')}` : 'Online Card/UPI Accepted'}
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-3.5 bg-stone-100/60 border border-stone-200/50 rounded-2xl max-w-sm text-[9px] font-mono text-stone-400 leading-normal break-inside-avoid page-break-inside-avoid invoice-qr-block">
-                      <span className="text-stone-500 font-bold uppercase block mb-1">PAYMENT RAIL PREVIEW</span>
-                      No payment gateway or UPI configured. Set your UPI ID or Payment Link in the options bar above to render a live payment QR code instantly.
-                    </div>
-                  )}
+                  <h3 className="font-bold text-white text-sm line-clamp-1 mb-1">
+                    {tmpl.stageName}
+                  </h3>
+                  <p className="text-slate-400 text-xs line-clamp-2">
+                    {tmpl.description}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Main Editor & Live Preview Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Template Editor Box */}
+            <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-emerald-400" />
+                    Editing Format: <span className="text-emerald-400">{templates[editingStage]?.stageName}</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {templates[editingStage]?.description}
+                  </p>
                 </div>
 
-                <div className="w-full md:w-72 bg-[#F6F3EB]/60 border border-gold-500/15 p-5 rounded-2xl space-y-2.5 text-xs text-stone-600 font-mono shadow-sm">
-                  <div className="flex justify-between">
-                    <span className="text-stone-400">SUBTOTAL:</span>
-                    <span className="text-stone-900 font-semibold">₹{subtotal.toLocaleString('en-IN')}</span>
-                  </div>
-                  {discount > 0 && (
-                    <div className="flex justify-between text-red-500">
-                      <span className="font-medium">DISCOUNT:</span>
-                      <span className="font-bold">- ₹{discount.toLocaleString('en-IN')}</span>
-                    </div>
-                  )}
-                  {includeGst && (
-                    <div className="flex justify-between">
-                      <span className="text-stone-400">GST (18% Service):</span>
-                      <span className="text-stone-900 font-semibold">₹{gstAmount.toLocaleString('en-IN')}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-sm font-bold text-stone-900 pt-1 border-b border-gold-500/10 pb-1.5">
-                    <span className="text-stone-900 tracking-wide">TOTAL VALUE:</span>
-                    <span className="text-stone-900 font-sans font-black">₹{totalAmount.toLocaleString('en-IN')}</span>
-                  </div>
-                  {totalPaymentsReceived > 0 && (
-                    <div className="flex justify-between text-emerald-600">
-                      <span className="font-medium">TOTAL PAID:</span>
-                      <span className="font-bold">- ₹{totalPaymentsReceived.toLocaleString('en-IN')}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-sm font-bold text-stone-900 pt-1.5">
-                    <span className="text-stone-950 tracking-wide">BALANCE DUE:</span>
-                    <span className="text-gold-700 font-sans font-black text-base">₹{balanceDue.toLocaleString('en-IN')}</span>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleResetStageTemplate(editingStage)}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-semibold border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer"
+                    title="Reset this stage template to original default"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                    Reset Stage
+                  </button>
+                </div>
+              </div>
+
+              {/* Dynamic Variable Chips */}
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-2 flex items-center justify-between">
+                  <span>Available Placeholders (Click to insert into template):</span>
+                  <span className="text-[10px] text-slate-500">Auto-filled on share</span>
+                </label>
+                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 bg-slate-950/60 rounded-xl border border-slate-800/80">
+                  {AVAILABLE_VARIABLE_TAGS.map((item) => (
+                    <button
+                      key={item.tag}
+                      type="button"
+                      onClick={() => handleInsertTagToEditor(item.tag)}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-emerald-600/30 hover:border-emerald-500/50 text-slate-200 border border-slate-700 rounded-lg text-xs font-mono transition-all flex items-center gap-1 cursor-pointer"
+                      title={`Insert ${item.tag} (${item.example})`}
+                    >
+                      <Plus className="w-3 h-3 text-emerald-400 shrink-0" />
+                      <span>{item.tag}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Editor Textarea */}
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  WhatsApp Raw Text Pattern:
+                </label>
+                <textarea
+                  rows={14}
+                  value={activeEditingText}
+                  onChange={(e) => setActiveEditingText(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700/80 rounded-xl p-3.5 text-xs sm:text-sm font-mono text-slate-100 focus:ring-2 focus:ring-emerald-500 outline-none leading-relaxed resize-y"
+                  placeholder="Type WhatsApp formatted message..."
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between gap-3 pt-2">
+                <div className="text-xs text-slate-400">
+                  <span className="text-emerald-400 font-bold">Tip:</span> Use <code className="text-amber-300">*bold*</code> and <code className="text-amber-300">• bullets</code> for WhatsApp formatting.
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSaveStageTemplate(editingStage)}
+                    className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-emerald-600/20 flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+                  >
+                    <Save className="w-4 h-4" />
+                    Save Template
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* Signature Block */}
-            <div className="flex justify-between items-end border-t border-gold-500/10 pt-8 mt-8 invoice-signature break-inside-avoid page-break-inside-avoid">
-              <div className="text-[9px] font-mono text-stone-400 space-y-0.5">
-                <p className="font-medium">System Generated Invoicing Statement</p>
-                <p>© 2026 The Frame Cut Studio OS</p>
+            {/* Live Rendered WhatsApp Message Preview */}
+            <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between space-y-4">
+              <div>
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-emerald-400" />
+                    Live WhatsApp Preview
+                  </h3>
+                  <span className="text-[11px] font-mono bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                    {currentStudio?.name || 'Studio Data'}
+                  </span>
+                </div>
+
+                {/* Simulated WhatsApp Chat Bubble */}
+                <div className="bg-[#0b141a] rounded-2xl border border-emerald-900/40 p-4 shadow-2xl relative overflow-hidden">
+                  <div className="flex items-center gap-2 pb-3 mb-3 border-b border-emerald-900/30 text-xs font-semibold text-emerald-400">
+                    <MessageSquare className="w-4 h-4 fill-emerald-500 text-emerald-950" />
+                    <span>WhatsApp Chat Simulation</span>
+                    <span className="ml-auto text-[10px] text-slate-500">To: {currentStudio?.phone || 'Client'}</span>
+                  </div>
+
+                  <div className="bg-[#202c33] text-slate-100 p-3.5 rounded-xl rounded-tl-none font-sans text-xs sm:text-sm whitespace-pre-wrap leading-relaxed shadow-md border border-slate-700/50">
+                    {getFormattedMessageText(editingStage, activeEditingText)}
+                    
+                    <div className="flex items-center justify-end gap-1 text-[10px] text-slate-400 mt-2">
+                      <span>11:24 AM</span>
+                      <span className="text-emerald-400 font-bold">✓✓</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="text-right">
-                <div className="border-b border-gold-500/20 w-40 ml-auto h-10 flex items-end justify-center font-serif text-sm italic text-stone-700 pb-1 pr-2 tracking-wide select-none">
-                  Satish Tiwari
-                </div>
-                <span className="text-[8px] font-mono text-gold-600 block mt-1.5 tracking-wider uppercase font-semibold">AUTHORIZED MANAGER SIGNATURE</span>
+              {/* Share & Quick Apply Actions */}
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedStage(editingStage);
+                    handleSaveStageTemplate(editingStage);
+                    handleWhatsAppSend();
+                  }}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                >
+                  <Send className="w-4 h-4" />
+                  Test Send Stage Message via WhatsApp
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedStage(editingStage);
+                    setActiveInvoiceTab('builder');
+                    showToast(`Applied ${templates[editingStage]?.stageName} as active stage format!`);
+                  }}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                >
+                  <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                  Set as Active Stage for Current Invoice
+                </button>
               </div>
             </div>
           </div>
         </div>
-
-        {/* Floating Quick billing action rail */}
-        <div className="space-y-6 print:hidden">
-          <div className="p-6 rounded-3xl glass-panel space-y-4">
-            <h3 className="text-sm font-bold font-display text-white">Invoice Actions</h3>
-            <p className="text-xs text-gray-400 leading-relaxed">Direct billing dispatch commands to clear outstanding wedding balance reserves.</p>
-
-            <div className="space-y-2.5 pt-2">
-              <button
-                id="btn-print-invoice"
-                onClick={handlePrint}
-                className="w-full flex items-center justify-between p-3.5 bg-gradient-to-r from-luxury-green-800 to-luxury-green-600 hover:scale-[1.02] active:scale-[0.98] transition-transform text-white text-xs font-bold rounded-2xl cursor-pointer"
-              >
-                <span>Print / Save PDF File</span>
-                <Printer className="w-4 h-4 text-gold-300" />
-              </button>
-
-              <button
-                id="btn-download-pdf"
-                onClick={() => {
-                  try {
-                    const filename = handleExportPDF();
-                    triggerToast("PDF Downloaded", `Consolidated statement ${filename} has been saved.`);
-                  } catch (err) {
-                    console.error('PDF generation failed:', err);
-                    triggerToast("PDF Error", "Failed to compile multi-page PDF document.");
-                  }
-                }}
-                className="w-full flex items-center justify-between p-3.5 bg-charcoal-800 hover:bg-charcoal-700 text-gray-200 text-xs font-medium rounded-2xl cursor-pointer"
-              >
-                <span>Download Invoice PDF</span>
-                <FileText className="w-4 h-4 text-amber-400" />
-              </button>
-
-              <button
-                id="btn-share-whatsapp"
-                onClick={handleShareWhatsApp}
-                className="w-full flex items-center justify-between p-3.5 bg-charcoal-800 hover:bg-charcoal-700 text-gray-200 text-xs font-medium rounded-2xl cursor-pointer"
-              >
-                <span>Dispatch via WhatsApp Link</span>
-                <Share2 className="w-4 h-4 text-emerald-400" />
-              </button>
-
-              <button
-                id="btn-share-email"
-                onClick={handleShareEmail}
-                className="w-full flex items-center justify-between p-3.5 bg-charcoal-800 hover:bg-charcoal-700 text-gray-200 text-xs font-medium rounded-2xl cursor-pointer"
-              >
-                <span>Email Invoice PDF Copy</span>
-                <Mail className="w-4 h-4 text-purple-400" />
-              </button>
-
-              <button
-                id="btn-simulate-email"
-                onClick={handleSimulateEmailNotification}
-                className="w-full flex items-center justify-between p-3.5 bg-[#d4af37]/15 hover:bg-[#d4af37]/25 border border-gold-500/30 text-gold-200 text-xs font-bold rounded-2xl cursor-pointer transition-colors"
-              >
-                <span>Simulate Mail Link Delivery</span>
-                <Send className="w-4 h-4 text-gold-400" />
-              </button>
-
-              <button
-                id="btn-save-invoice"
-                onClick={handleRegisterInvoice}
-                className="w-full flex items-center justify-between p-3.5 bg-charcoal-900 border border-gold-500/30 hover:border-gold-500 text-gold-400 text-xs font-bold rounded-2xl cursor-pointer"
-              >
-                <span>Save to Company Ledger</span>
-                <Check className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Company Invoice Ledger list (with swipe gesture support) */}
-          <div className="p-6 rounded-3xl glass-panel space-y-4">
-            <div className="flex justify-between items-center">
-              <h3 className="text-sm font-bold font-display text-white">Company Invoice Ledger</h3>
-              <span className="text-[10px] font-mono bg-luxury-green-950 px-2 py-0.5 rounded-full text-gold-400">
-                {invoices.length}
+      ) : (
+        /* ================= INVOICE BUILDER VIEW ================= */
+        <>
+          {/* ================= HEADER / TOP BAR ================= */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4 print:border-none print:shadow-none print:bg-white print:text-black">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-amber-500" />
+            <span className="text-sm text-slate-400 font-medium">Studio:</span>
+            {currentUser?.role === 'studio' ? (
+              <span className="text-lg font-bold text-white bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
+                {currentStudio?.name || 'Wedding By KK'}
               </span>
-            </div>
-            <p className="text-[9px] text-gray-400 font-mono leading-relaxed">Swipe left to delete permanently, swipe right to mark as paid.</p>
+            ) : (
+              <select
+                value={selectedStudioId}
+                onChange={(e) => setSelectedStudioId(e.target.value)}
+                className="bg-slate-800 text-amber-400 font-bold text-base sm:text-lg border border-slate-700 rounded-xl px-3 py-2 focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
+              >
+                {studios.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
 
-            <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-              {invoices.length > 0 ? (
-                invoices.map((inv) => (
-                  <SwipeableCard
-                    key={inv.id}
-                    id={inv.id}
-                    leftLabel="Mark Paid"
-                    leftBgColor="bg-emerald-950/40 border-emerald-500/20"
-                    leftColor="text-emerald-400"
-                    onSwipeLeft={onDeleteInvoice ? async () => {
-                      setInvoiceToDeleteId(inv.id);
-                    } : undefined}
-                    onSwipeRight={onUpdateInvoice ? async () => {
-                      await onUpdateInvoice(inv.id, { status: 'paid', balanceDue: 0 });
-                      triggerToast("Invoice Marked Paid", `Invoice ${inv.id} marked as paid successfully!`);
-                    } : undefined}
-                    className="p-3 bg-charcoal-900 border border-luxury-green-800/10 rounded-2xl flex justify-between items-center cursor-pointer hover:border-gold-500/15 transition-colors group"
-                  >
-                    <div className="flex-1 min-w-0 pr-2">
-                      <div className="flex items-center space-x-1.5">
-                        <span className="text-[9px] font-mono text-gray-500">{inv.id}</span>
-                        <span className={`text-[8px] font-mono px-1 py-0.2 rounded-md ${
-                          inv.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
-                        }`}>
-                          {inv.status}
-                        </span>
-                      </div>
-                      <h4 className="text-xs font-semibold text-gray-300 mt-1 truncate">{inv.coupleName}</h4>
-                      <p className="text-[8px] text-gray-500 truncate">{inv.studioName}</p>
-                    </div>
-
-                    <div className="flex items-center space-x-2 shrink-0">
-                      <div className="text-right">
-                        <span className="text-xs font-mono font-bold text-white block">₹{inv.totalAmount.toLocaleString('en-IN')}</span>
-                        <span className="text-[8px] text-gray-500 font-mono block mt-0.5">{inv.invoiceDate}</span>
-                      </div>
-                      {onDeleteInvoice && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setInvoiceToDeleteId(inv.id);
-                          }}
-                          className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity animate-none"
-                          title="Delete Invoice"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </SwipeableCard>
-                ))
-              ) : (
-                <div className="text-center py-6 text-[10px] text-gray-500 font-mono border border-dashed border-luxury-green-800/10 rounded-2xl">
-                  No invoice ledger history.
-                </div>
-              )}
-            </div>
+        <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-sm">
+          <div className="bg-slate-800/80 px-3.5 py-2 rounded-xl border border-slate-700/60 flex items-center gap-2">
+            <span className="text-slate-400">Invoice No :</span>
+            <input
+              type="text"
+              value={invoiceNo}
+              onChange={(e) => setInvoiceNo(e.target.value)}
+              className="bg-transparent font-bold text-amber-400 w-32 outline-none border-b border-transparent hover:border-slate-600 focus:border-amber-500 text-right"
+            />
           </div>
 
-          <div className="p-5 rounded-3xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400 leading-relaxed flex space-x-2">
-            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-            <span>Printing handles spacing automatically and formats sheets perfectly in Portrait Mode.</span>
+          <div className="bg-slate-800/80 px-3.5 py-2 rounded-xl border border-slate-700/60 flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-amber-400" />
+            <span className="text-slate-400">Date :</span>
+            <input
+              type="date"
+              value={invoiceDate}
+              onChange={(e) => setInvoiceDate(e.target.value)}
+              className="bg-transparent font-bold text-slate-200 outline-none cursor-pointer"
+            />
           </div>
         </div>
       </div>
 
-      {/* Simulation Modal Overlay */}
-      <AnimatePresence>
-        {showSimulationModal && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 print:hidden">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              transition={{ type: 'spring', duration: 0.4 }}
-              className="w-full max-w-lg bg-charcoal-900 border border-luxury-green-800/40 rounded-3xl p-6 shadow-2xl relative overflow-hidden"
-            >
-              {/* Subtle ambient gold and green organic background blur glows */}
-              <div className="absolute -top-24 -left-24 w-48 h-48 bg-[#d4af37]/10 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-luxury-green-500/10 rounded-full blur-3xl pointer-events-none" />
+      {/* ================= 5 STATS CARDS ================= */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between hover:border-amber-500/30 transition-all">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Projects</span>
+          <span className="text-2xl sm:text-3xl font-extrabold text-white mt-2">{totalProjectsCount}</span>
+        </div>
 
-              {/* Header */}
-              <div className="flex items-center space-x-3.5 mb-5 border-b border-white/5 pb-4">
-                <div className={`p-3 rounded-2xl bg-[#d4af37]/10 border border-gold-500/20 text-gold-400 ${isSimulatingEmail ? 'animate-pulse' : ''}`}>
-                  <Send className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold font-display text-white">Client Email Notification Relay</h3>
-                  <p className="text-xs text-gray-400">Simulation engine for automated wedding contract billing</p>
-                </div>
-              </div>
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between hover:border-emerald-500/30 transition-all">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Business</span>
+          <span className="text-xl sm:text-2xl font-extrabold text-emerald-400 mt-2">
+            ₹{totalBusiness.toLocaleString('en-IN')}
+          </span>
+        </div>
 
-              {/* Recipient info */}
-              <div className="bg-black/55 p-4 rounded-2xl border border-white/5 mb-5 space-y-2">
-                <div className="flex justify-between items-center text-[11px] font-mono">
-                  <span className="text-gray-400">Recipient Email</span>
-                  <span className="text-gold-300 font-medium">{currentStudio?.email || 'partner@weddingstudio.com'}</span>
-                </div>
-                <div className="flex justify-between items-center text-[11px] font-mono">
-                  <span className="text-gray-400">Active Ledger Projects</span>
-                  <span className="text-white font-medium">{studioProjects.length} Projects</span>
-                </div>
-                <div className="flex justify-between items-center text-[11px] font-mono">
-                  <span className="text-gray-400">Pending Balance Due</span>
-                  <span className="text-rose-400 font-bold">₹{balanceDue.toLocaleString('en-IN')}</span>
-                </div>
-              </div>
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between hover:border-blue-500/30 transition-all">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Received</span>
+          <span className="text-xl sm:text-2xl font-extrabold text-blue-400 mt-2">
+            ₹{totalReceived.toLocaleString('en-IN')}
+          </span>
+        </div>
 
-              {/* Progress Flow steps */}
-              <div className="space-y-4 mb-5 bg-black/25 p-4 rounded-2xl border border-white/5">
-                <div className="relative pl-6 space-y-5">
-                  <div className="absolute left-[9px] top-2 bottom-2 w-0.5 bg-charcoal-800" />
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between hover:border-amber-500/30 transition-all">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Outstanding</span>
+          <span className="text-xl sm:text-2xl font-extrabold text-amber-400 mt-2">
+            ₹{outstanding.toLocaleString('en-IN')}
+          </span>
+        </div>
 
-                  {/* Step 1 */}
-                  <div className="relative flex items-start space-x-3">
-                    <span className={`absolute -left-6 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold border transition-colors ${
-                      simulationStep >= 2
-                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
-                        : simulationStep === 1
-                          ? 'bg-gold-500 text-emerald-950 border-gold-500 animate-pulse'
-                          : 'bg-charcoal-900 border-charcoal-800 text-gray-600'
-                    }`}>
-                      {simulationStep >= 2 ? '✓' : '1'}
-                    </span>
-                    <div>
-                      <h4 className={`text-xs font-semibold ${simulationStep >= 1 ? 'text-white' : 'text-gray-500'}`}>
-                        Link Generator Routing
-                      </h4>
-                      <p className="text-[10px] text-gray-400 mt-0.5">Creating unique web hosting token for public invoice document.</p>
-                    </div>
-                  </div>
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 col-span-2 sm:col-span-1 flex flex-col justify-between hover:border-purple-500/30 transition-all">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Last Payment</span>
+          <span className="text-xl sm:text-2xl font-extrabold text-purple-400 mt-2">
+            ₹{lastPayment.toLocaleString('en-IN')}
+          </span>
+        </div>
+      </div>
 
-                  {/* Step 2 */}
-                  <div className="relative flex items-start space-x-3">
-                    <span className={`absolute -left-6 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold border transition-colors ${
-                      simulationStep >= 3
-                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
-                        : simulationStep === 2
-                          ? 'bg-gold-500 text-emerald-950 border-gold-500 animate-pulse'
-                          : 'bg-charcoal-900 border-charcoal-800 text-gray-600'
-                    }`}>
-                      {simulationStep >= 3 ? '✓' : '2'}
-                    </span>
-                    <div>
-                      <h4 className={`text-xs font-semibold ${simulationStep >= 2 ? 'text-white' : 'text-gray-500'}`}>
-                        SMTP Gateway Handshake
-                      </h4>
-                      <p className="text-[10px] text-gray-400 mt-0.5">Verifying MX records and establishing secure TTL email session.</p>
-                    </div>
-                  </div>
+      {/* ================= PROJECTS (AUTO LOAD) ================= */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-3">
+            <Film className="w-5 h-5 text-amber-400" />
+            <h3 className="text-lg font-bold text-white tracking-wide">PROJECTS (Auto Load)</h3>
+          </div>
 
-                  {/* Step 3 */}
-                  <div className="relative flex items-start space-x-3">
-                    <span className={`absolute -left-6 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold border transition-colors ${
-                      simulationStep >= 5
-                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
-                        : (simulationStep === 3 || simulationStep === 4)
-                          ? 'bg-gold-500 text-emerald-950 border-gold-500 animate-pulse'
-                          : 'bg-charcoal-900 border-charcoal-800 text-gray-600'
-                    }`}>
-                      {simulationStep >= 5 ? '✓' : '3'}
-                    </span>
-                    <div>
-                      <h4 className={`text-xs font-semibold ${simulationStep >= 3 ? 'text-white' : 'text-gray-500'}`}>
-                        Delivery & Audit Logging
-                      </h4>
-                      <p className="text-[10px] text-gray-400 mt-0.5">Dispatched notification with dynamic body containing receipt URL.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+          <label className="flex items-center gap-2 text-sm text-amber-400 font-semibold cursor-pointer hover:text-amber-300">
+            <input
+              type="checkbox"
+              checked={allProjectsSelected}
+              onChange={handleToggleSelectAllProjects}
+              className="w-4 h-4 rounded text-amber-500 bg-slate-800 border-slate-700 focus:ring-amber-500 focus:ring-offset-slate-900 cursor-pointer"
+            />
+            Select All
+          </label>
+        </div>
 
-              {/* Console logs */}
-              <div className="bg-black/80 rounded-2xl border border-white/5 p-4 font-mono text-[9px] text-emerald-400 h-28 overflow-y-auto space-y-1.5 scrollbar-thin">
-                {simulationLogs.map((log, idx) => (
-                  <div key={idx} className="leading-relaxed">
-                    <span className="text-gray-500 mr-1">&gt;</span> {log}
-                  </div>
-                ))}
-              </div>
-
-              {/* Footer controls */}
-              <div className="mt-5 flex justify-between items-center pt-4 border-t border-white/5">
-                <span className="text-[10px] font-mono text-gray-400 flex items-center gap-1.5">
-                  {isSimulatingEmail ? (
-                    <>
-                      <span className="w-1.5 h-1.5 rounded-full bg-gold-400 animate-ping" />
-                      Active Dispatch Relay
-                    </>
-                  ) : (
-                    <>
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      Transmission Finished
-                    </>
-                  )}
-                </span>
-
-                {isSimulatingEmail ? (
-                  <div className="text-xs font-mono text-gold-300 animate-pulse">Running Simulation...</div>
-                ) : (
-                  <button
-                    onClick={() => setShowSimulationModal(false)}
-                    className="px-5 py-2 bg-gradient-to-r from-gold-500 to-gold-400 hover:from-gold-400 hover:to-gold-300 text-emerald-950 font-mono text-xs font-bold rounded-xl cursor-pointer transition-all shadow-md active:scale-95"
-                  >
-                    Done
-                  </button>
-                )}
-              </div>
-            </motion.div>
+        {studioProjects.length === 0 ? (
+          <div className="text-center py-8 text-slate-500 text-sm">
+            No projects found for {currentStudio?.name || 'this studio'}. You can add projects from the Registry tab.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-slate-300 border-collapse">
+              <thead>
+                <tr className="bg-slate-800/60 border-b border-slate-700 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  <th className="p-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={allProjectsSelected}
+                      onChange={handleToggleSelectAllProjects}
+                      className="w-4 h-4 rounded text-amber-500 bg-slate-800 border-slate-700 cursor-pointer"
+                    />
+                  </th>
+                  <th className="p-3">Couple Name</th>
+                  <th className="p-3">Project</th>
+                  <th className="p-3 text-right">Amount</th>
+                  <th className="p-3 text-center">Status</th>
+                  <th className="p-3 text-center">Invoice</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {studioProjects.map((p) => {
+                  const isChecked = !!selectedProjectIds[p.id];
+                  return (
+                    <tr
+                      key={p.id}
+                      onClick={() => handleToggleProject(p.id)}
+                      className={`hover:bg-slate-800/40 transition-colors cursor-pointer ${
+                        isChecked ? 'bg-amber-500/5' : ''
+                      }`}
+                    >
+                      <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleProject(p.id)}
+                          className="w-4 h-4 rounded text-amber-500 bg-slate-800 border-slate-700 cursor-pointer"
+                        />
+                      </td>
+                      <td className="p-3 font-semibold text-white">{p.coupleName}</td>
+                      <td className="p-3 text-slate-300">{p.eventType || 'Full Wedding'}</td>
+                      <td className="p-3 text-right font-bold text-amber-400">
+                        ₹{(p.projectAmount || 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="p-3 text-center">
+                        <span
+                          className={`px-2.5 py-1 text-xs font-semibold rounded-full ${
+                            p.status === 'delivered' || p.status === 'closed'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                          }`}
+                        >
+                          {p.status === 'delivered' ? 'Completed' : p.status}
+                        </span>
+                      </td>
+                      <td className="p-3 text-center">
+                        <span className="px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          Pending
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
-      </AnimatePresence>
 
-      {/* Delete Invoice Confirmation Modal */}
-      <AnimatePresence>
-        {invoiceToDeleteId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="fixed inset-0 bg-black/85 backdrop-blur-md" onClick={() => setInvoiceToDeleteId(null)} />
-            
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="relative w-full max-w-md p-6 overflow-hidden text-left bg-charcoal-900 border border-red-500/30 rounded-3xl shadow-[0_20px_50px_rgba(239,68,68,0.2)] z-10"
-            >
-              <div className="flex items-start space-x-3.5">
-                <div className="p-3 bg-red-500/10 text-red-400 rounded-2xl border border-red-500/20">
-                  <AlertCircle className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white font-display">Delete Invoice</h3>
-                  <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">
-                    Are you sure you want to permanently delete invoice {invoiceToDeleteId}? This action cannot be undone and will scrub it from our financial statements.
-                  </p>
-                </div>
+        <div className="flex justify-end pt-3 border-t border-slate-800">
+          <div className="text-right">
+            <span className="text-slate-400 text-sm mr-3">Project Total :</span>
+            <span className="text-xl sm:text-2xl font-black text-amber-400">
+              ₹{selectedProjectsTotal.toLocaleString('en-IN')}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ================= ADVANCE PAYMENT HISTORY ================= */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-3">
+            <IndianRupee className="w-5 h-5 text-emerald-400" />
+            <h3 className="text-lg font-bold text-white tracking-wide">ADVANCE PAYMENT HISTORY</h3>
+          </div>
+
+          <button
+            onClick={() => setShowAddAdvanceModal(true)}
+            className="flex items-center gap-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-semibold px-3 py-1.5 rounded-xl transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            Add Advance Payment
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm text-slate-300 border-collapse">
+            <thead>
+              <tr className="bg-slate-800/60 border-b border-slate-700 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                <th className="p-3">Date</th>
+                <th className="p-3">Paid By</th>
+                <th className="p-3">Payment Mode</th>
+                <th className="p-3 text-right">Amount</th>
+                <th className="p-3 text-center w-20">Adjust</th>
+                <th className="p-3 text-center w-16">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60">
+              {advanceList.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center py-6 text-slate-500 text-sm">
+                    No advance payments recorded yet. Click "+ Add Advance Payment" to log one.
+                  </td>
+                </tr>
+              ) : (
+                advanceList.map((adv) => {
+                  const isCash = adv.paymentMode.toLowerCase().includes('cash');
+                  return (
+                    <tr key={adv.id} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="p-3 font-medium text-slate-200">
+                        {new Date(adv.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </td>
+                      <td className="p-3 text-white font-semibold">{adv.paidBy}</td>
+                      <td className="p-3">
+                        <select
+                          value={adv.paymentMode}
+                          onChange={(e) => handleUpdateAdvanceMode(adv.id, e.target.value)}
+                          className={`text-xs font-bold border rounded-lg px-2.5 py-1 outline-none transition-all cursor-pointer ${
+                            isCash
+                              ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60'
+                              : 'bg-sky-950/80 text-sky-300 border-sky-700/60'
+                          }`}
+                        >
+                          <option value="Cash">💵 Cash</option>
+                          <option value="Online (UPI)">💳 Online (UPI / GPay / PhonePe)</option>
+                          <option value="Bank Transfer">🏦 Bank Transfer</option>
+                          <option value="Cheque">📝 Cheque</option>
+                        </select>
+                      </td>
+                      <td className="p-3 text-right font-bold text-emerald-400">
+                        ₹{adv.amount.toLocaleString('en-IN')}
+                      </td>
+                      <td className="p-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={adv.adjusted}
+                          onChange={() => handleToggleAdvanceAdjust(adv.id)}
+                          className="w-4 h-4 rounded text-emerald-500 bg-slate-800 border-slate-700 cursor-pointer"
+                        />
+                      </td>
+                      <td className="p-3 text-center">
+                        <button
+                          onClick={() => handleDeleteAdvance(adv.id)}
+                          title="Delete Entry"
+                          className="text-slate-500 hover:text-red-400 transition-colors p-1"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Cash vs Online Summary Bar */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-800 text-xs">
+          <div className="bg-emerald-950/40 border border-emerald-800/40 p-2.5 rounded-xl flex items-center justify-between">
+            <span className="text-emerald-300 font-medium flex items-center gap-1.5">
+              💵 Cash Advance Total:
+            </span>
+            <span className="font-extrabold text-emerald-400 text-sm">
+              ₹{cashAdvanceTotal.toLocaleString('en-IN')}
+            </span>
+          </div>
+          <div className="bg-sky-950/40 border border-sky-800/40 p-2.5 rounded-xl flex items-center justify-between">
+            <span className="text-sky-300 font-medium flex items-center gap-1.5">
+              💳 Online Advance Total:
+            </span>
+            <span className="font-extrabold text-sky-400 text-sm">
+              ₹{onlineAdvanceTotal.toLocaleString('en-IN')}
+            </span>
+          </div>
+          <div className="bg-amber-950/40 border border-amber-800/40 p-2.5 rounded-xl flex items-center justify-between">
+            <span className="text-amber-300 font-medium flex items-center gap-1.5">
+              ✨ Total Advance Adjusted:
+            </span>
+            <span className="font-black text-amber-400 text-base">
+              ₹{advanceTotal.toLocaleString('en-IN')}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ================= INVOICE SUMMARY ================= */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4 relative overflow-hidden">
+        {/* Background Watermark Logo - positioned elegantly inside container without clipping */}
+        <div className="absolute right-4 bottom-2 pointer-events-none opacity-20 select-none z-0">
+          <Logo size={220} showText={true} variant="gold" />
+        </div>
+
+        <div className="relative z-10">
+          <h3 className="text-lg font-bold text-white tracking-wide border-b border-slate-800 pb-3 mb-4">
+            INVOICE SUMMARY
+          </h3>
+
+        <div className="max-w-xl ml-auto space-y-3">
+          <div className="flex items-center justify-between text-slate-300 py-1">
+            <span>Project Total</span>
+            <span className="font-bold text-white text-base">₹{selectedProjectsTotal.toLocaleString('en-IN')}</span>
+          </div>
+
+          <div className="flex items-center justify-between text-slate-300 py-1">
+            <span>Previous Balance</span>
+            <div className="flex items-center gap-1">
+              <span className="text-slate-400 text-sm">₹</span>
+              <input
+                type="number"
+                value={previousBalance === 0 ? '' : previousBalance}
+                onChange={(e) => setPreviousBalance(Number(e.target.value) || 0)}
+                placeholder="0"
+                className="bg-slate-800 text-white font-semibold border border-slate-700 rounded-lg px-2.5 py-1 text-right w-32 focus:ring-2 focus:ring-amber-500 outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between text-slate-300 py-1">
+            <span>Advance Adjust</span>
+            <span className="font-bold text-emerald-400 text-base">-₹{advanceTotal.toLocaleString('en-IN')}</span>
+          </div>
+
+          <div className="flex items-center justify-between text-slate-300 py-1">
+            <span>Discount</span>
+            <div className="flex items-center gap-1">
+              <span className="text-slate-400 text-sm">₹</span>
+              <input
+                type="number"
+                value={discount === 0 ? '' : discount}
+                onChange={(e) => setDiscount(Number(e.target.value) || 0)}
+                placeholder="0"
+                className="bg-slate-800 text-white font-semibold border border-slate-700 rounded-lg px-2.5 py-1 text-right w-32 focus:ring-2 focus:ring-amber-500 outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="border-t-2 border-slate-700 pt-3 mt-2 flex items-center justify-between">
+            <span className="text-lg font-black text-white">TOTAL PAYABLE</span>
+            <span className="text-2xl sm:text-3xl font-black text-amber-400">
+              ₹{totalPayable.toLocaleString('en-IN')}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            <span className="text-sm text-slate-400 font-medium">Payment Status :</span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+              totalPayable === 0 
+                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
+                : 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+            }`}>
+              {totalPayable === 0 ? '🟢 Paid in Full' : '🔵 Tax Invoice'}
+            </span>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      {/* ================= PAYMENT DETAILS ================= */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
+        <h3 className="text-lg font-bold text-white tracking-wide border-b border-slate-800 pb-3">
+          PAYMENT DETAILS
+        </h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+          <div className="md:col-span-2 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Account Holder</label>
+                <input
+                  type="text"
+                  value={accountHolder}
+                  onChange={(e) => setAccountHolder(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold focus:ring-2 focus:ring-amber-500 outline-none"
+                />
               </div>
 
-              <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-white/5">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Bank Name</label>
+                <input
+                  type="text"
+                  value={bankName}
+                  onChange={(e) => setBankName(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Account Number</label>
+                <input
+                  type="text"
+                  value={accountNumber}
+                  onChange={(e) => setAccountNumber(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">IFSC Code</label>
+                <input
+                  type="text"
+                  value={ifscCode}
+                  onChange={(e) => setIfscCode(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">UPI ID</label>
+              <input
+                type="text"
+                value={upiId}
+                onChange={(e) => setUpiId(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-amber-400 font-bold focus:ring-2 focus:ring-amber-500 outline-none"
+              />
+            </div>
+          </div>
+
+          {/* QR Code Container */}
+          <div className="flex flex-col items-center justify-center p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60 text-center space-y-2">
+            <div className="bg-white p-2.5 rounded-xl shadow-md border border-slate-200">
+              <img
+                src={qrCodeUrl}
+                alt="UPI Payment QR Code"
+                className="w-32 h-32 object-contain"
+              />
+            </div>
+            <span className="text-xs font-semibold text-slate-300 flex items-center gap-1 mt-1">
+              <QrCode className="w-3.5 h-3.5 text-amber-400" />
+              Scan & Pay via Any UPI App
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ================= DELIVERY ================= */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl space-y-4">
+        <h3 className="text-lg font-bold text-white tracking-wide border-b border-slate-800 pb-3">
+          DELIVERY
+        </h3>
+
+        <div className="space-y-4 text-sm">
+          <div>
+            <label className="text-xs text-slate-400 block mb-1 font-medium">Google Drive Link</label>
+            <input
+              type="text"
+              value={driveLink}
+              onChange={(e) => setDriveLink(e.target.value)}
+              placeholder="https://drive.google.com/drive/folders/..."
+              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-blue-400 font-medium focus:ring-2 focus:ring-amber-500 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-slate-400 block mb-1 font-medium">Notes</label>
+            <textarea
+              rows={3}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Enter special instructions or payment terms..."
+              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-200 focus:ring-2 focus:ring-amber-500 outline-none resize-none"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ================= ACTION BUTTONS (BOTTOM BAR) ================= */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col items-center justify-between gap-3 sticky bottom-4 z-20 backdrop-blur-md bg-slate-900/90 print:hidden">
+        {effectivePdfPath && (
+          <div className="w-full flex items-center justify-between gap-2 px-3.5 py-2 bg-emerald-950/80 border border-emerald-500/30 rounded-xl text-xs font-mono text-emerald-300 shadow-inner">
+            <div className="flex items-center gap-2 overflow-hidden">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="truncate">Attached in Firestore: <strong className="text-white">{effectivePdfPath}</strong></span>
+            </div>
+            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-md shrink-0">
+              Ready for WhatsApp
+            </span>
+          </div>
+        )}
+
+        <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          {toastMessage ? (
+            <span className="text-xs font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 animate-fadeIn">
+              <Sparkles className="w-4 h-4 text-amber-400" /> {toastMessage}
+            </span>
+          ) : saveSuccess ? (
+            <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1 animate-fadeIn">
+              <Check className="w-4 h-4" /> Draft Saved!
+            </span>
+          ) : (
+            <span className="text-xs text-slate-500 hidden md:inline-block">
+              All invoice actions ready & downloadable
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-center gap-2.5">
+          <button
+            onClick={() => setShowPreviewModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs sm:text-sm font-semibold border border-slate-700 transition-all active:scale-95 cursor-pointer"
+          >
+            <Eye className="w-4 h-4 text-amber-400" />
+            Preview
+          </button>
+
+          <button
+            onClick={handleGenerateAndAttachPDF}
+            disabled={isGeneratingPdf}
+            className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl text-xs sm:text-sm font-semibold transition-all active:scale-95 disabled:opacity-50 cursor-pointer shadow-lg shadow-teal-600/20"
+            title="Generate PDF with jsPDF & store file URL in Firestore for WhatsApp link"
+          >
+            {isGeneratingPdf ? (
+              <Loader2 className="w-4 h-4 text-white animate-spin" />
+            ) : (
+              <FileCheck className="w-4 h-4 text-emerald-200" />
+            )}
+            {isGeneratingPdf ? 'Attaching...' : 'Generate & Attach PDF'}
+          </button>
+
+          <button
+            onClick={handleGeneratePDF}
+            disabled={isGeneratingPdf}
+            className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs sm:text-sm font-semibold border border-slate-700 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+          >
+            {isGeneratingPdf ? (
+              <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+            ) : (
+              <FileText className="w-4 h-4 text-blue-400" />
+            )}
+            {isGeneratingPdf ? 'Generating PDF...' : 'Generate PDF'}
+          </button>
+
+          <button
+            onClick={handleWhatsAppSend}
+            disabled={isGeneratingPdf}
+            className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs sm:text-sm font-semibold transition-all active:scale-95 disabled:opacity-50 cursor-pointer shadow-lg shadow-emerald-600/20"
+          >
+            {isGeneratingPdf ? (
+              <Loader2 className="w-4 h-4 text-white animate-spin" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
+            {isGeneratingPdf ? 'Preparing PDF...' : 'Send to WhatsApp'}
+          </button>
+
+          <button
+            onClick={handleEmailSend}
+            className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs sm:text-sm font-semibold border border-slate-700 transition-all active:scale-95 cursor-pointer"
+          >
+            <Mail className="w-4 h-4 text-purple-400" />
+            Email
+          </button>
+
+          <button
+            onClick={handlePrint}
+            className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs sm:text-sm font-semibold border border-slate-700 transition-all active:scale-95 cursor-pointer"
+          >
+            <Printer className="w-4 h-4 text-slate-300" />
+            Print
+          </button>
+
+          <button
+            onClick={handleSaveDraft}
+            className="flex items-center gap-1.5 px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs sm:text-sm font-bold shadow-lg shadow-amber-500/20 transition-all active:scale-95 cursor-pointer"
+          >
+            <Save className="w-4 h-4" />
+            Save Draft
+          </button>
+        </div>
+      </div>
+      </div>
+
+      {/* ================= ADD ADVANCE PAYMENT MODAL ================= */}
+      {showAddAdvanceModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl animate-scaleUp">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-lg font-bold text-white">Add Advance Payment</h3>
+              <button
+                onClick={() => setShowAddAdvanceModal(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateAdvance} className="space-y-4 text-sm">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Paid By (Payer Name)</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Krishna"
+                  value={newAdvPaidBy}
+                  onChange={(e) => setNewAdvPaidBy(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Payment Mode</label>
+                <select
+                  value={newAdvMode}
+                  onChange={(e) => setNewAdvMode(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                >
+                  <option value="UPI">UPI / GPay / PhonePe</option>
+                  <option value="Bank Transfer">Bank Transfer (NEFT/IMPS)</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Cheque">Cheque</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Amount (₹)</label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  placeholder="e.g. 10000"
+                  value={newAdvAmount}
+                  onChange={(e) => setNewAdvAmount(Number(e.target.value) || '')}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-amber-400 font-bold focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Date</label>
+                <input
+                  type="date"
+                  required
+                  value={newAdvDate}
+                  onChange={(e) => setNewAdvDate(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setInvoiceToDeleteId(null)}
-                  className="px-4 py-2.5 text-xs font-semibold text-gray-400 hover:text-white transition-colors cursor-pointer"
+                  onClick={() => setShowAddAdvanceModal(false)}
+                  className="px-4 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800"
                 >
                   Cancel
                 </button>
                 <button
-                  type="button"
-                  onClick={async () => {
-                    if (invoiceToDeleteId && onDeleteInvoice) {
-                      await onDeleteInvoice(invoiceToDeleteId);
-                      const deletedId = invoiceToDeleteId;
-                      setInvoiceToDeleteId(null);
-                      triggerToast("Invoice Deleted", `Invoice ${deletedId} deleted successfully!`);
-                    }
-                  }}
-                  className="px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 text-white font-bold text-xs rounded-xl shadow-[0_4px_15px_rgba(239,68,68,0.25)] transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.99]"
+                  type="submit"
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl shadow-lg"
                 >
-                  Confirm Delete
+                  Add Payment
                 </button>
               </div>
-            </motion.div>
+            </form>
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
 
-      {/* Success Notification Alert Toast */}
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="fixed bottom-6 right-6 z-50 flex items-center space-x-3 bg-luxury-green-950/90 border border-gold-500/30 p-4 rounded-2xl shadow-2xl backdrop-blur-md max-w-sm gold-glow animate-none"
-          >
-            <div className="p-2 bg-gold-500/25 rounded-xl text-gold-400">
-              <Check className="w-4 h-4" />
+      {/* ================= PREVIEW INVOICE MODAL ================= */}
+      {showPreviewModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-2 sm:p-6 overflow-y-auto">
+          <div className="bg-white text-slate-900 rounded-3xl w-full max-w-3xl p-6 sm:p-10 space-y-6 shadow-2xl my-auto relative print:p-0 overflow-hidden border border-slate-100 font-sans">
+            
+            {/* Background Watermark Logo */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-15 select-none z-0">
+              <Logo size={360} showText={true} variant="gold" />
             </div>
-            <div>
-              <p className="text-xs font-bold text-white">{toast.title}</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">{toast.desc}</p>
+
+            <div className="relative z-10 space-y-6">
+              <button
+                onClick={() => setShowPreviewModal(false)}
+                className="absolute -top-2 -right-2 p-2 text-slate-400 hover:text-slate-900 print:hidden z-20 cursor-pointer"
+              >
+                <X className="w-6 h-6" />
+              </button>
+
+              {/* Top Header Banner */}
+              <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 text-white rounded-2xl p-5 shadow-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border border-amber-500/30">
+                <div className="flex items-center gap-3.5">
+                  <div className="p-2 bg-amber-500/10 rounded-xl border border-amber-500/20 shrink-0">
+                    <Logo size={48} variant="gold" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-black tracking-widest text-amber-400 uppercase bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full inline-block mb-1">
+                      CINEMATIC WEDDING SUITE & POST PRODUCTION
+                    </span>
+                    <h1 className="text-xl sm:text-2xl font-black tracking-wider text-white font-display">
+                      THE FRAME CUTS STUDIO
+                    </h1>
+                    <p className="text-[11px] text-slate-300 font-medium">Email: contact@theframecuts.com | Phone: +91 77729 99933</p>
+                  </div>
+                </div>
+
+                {/* Tax Invoice Pill Badge */}
+                <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-orange-600 text-slate-950 px-5 py-3.5 rounded-2xl shadow-md text-right min-w-[210px] font-bold">
+                  <h2 className="text-lg font-black uppercase tracking-widest text-slate-950">TAX INVOICE</h2>
+                  <div className="text-[11px] text-slate-900 space-y-0.5 mt-1 font-mono">
+                    <p>Invoice #: <span className="font-extrabold text-slate-950">{invoiceNo}</span></p>
+                    <p>Date: <span className="font-extrabold text-slate-950">{invoiceDate}</span></p>
+                    <p>Status: <span className="font-black text-emerald-950 bg-emerald-400/80 px-2 py-0.5 rounded-full uppercase text-[9px]">{totalPayable === 0 ? 'PAID IN FULL' : 'PARTIAL / ADVANCE SETTLED'}</span></p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bill To & Issued By Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className="bg-slate-50/90 border border-slate-200 rounded-2xl p-4 shadow-xs space-y-1">
+                  <span className="text-[10px] uppercase font-black tracking-wider text-orange-600 bg-orange-100/80 px-2.5 py-0.5 rounded-full inline-block mb-1">
+                    Invoice To (Client Studio):
+                  </span>
+                  <p className="text-base font-black text-slate-900">{currentStudio?.name || 'Wedding By KK'}</p>
+                  <p className="text-slate-600 font-medium">{currentStudio?.ownerName ? `Attn: ${currentStudio.ownerName}` : 'Attn: Studio Director'}</p>
+                  <p className="text-slate-500">{currentStudio?.phone || '+91 98260 00000'}</p>
+                  <p className="text-slate-500 text-[10px]">{currentStudio?.email || 'contact@studio.com'}</p>
+                </div>
+
+                <div className="bg-slate-50/90 border border-slate-200 rounded-2xl p-4 shadow-xs space-y-1 sm:text-right">
+                  <span className="text-[10px] uppercase font-black tracking-wider text-emerald-700 bg-emerald-100/80 px-2.5 py-0.5 rounded-full inline-block mb-1">
+                    Payment Receiver (Studio Admin):
+                  </span>
+                  <p className="text-base font-black text-slate-900">THE FRAME CUTS STUDIO</p>
+                  <p className="text-slate-600 font-medium">Satish Tiwari — Founder & Lead Director</p>
+                  <p className="text-slate-500">Raipur, Chhattisgarh, India</p>
+                  <p className="text-slate-500 text-[10px]">GST / Reg: 22AAAAA0000A1Z5</p>
+                </div>
+              </div>
+
+              {/* Project Line Items Table */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                    <Film className="w-3.5 h-3.5 text-amber-600" />
+                    1. Project Services & Deliverables
+                  </h3>
+                  <span className="text-[10px] font-mono text-slate-500 font-bold">
+                    {studioProjects.filter(p => selectedProjectIds[p.id]).length} Items Selected
+                  </span>
+                </div>
+
+                <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+                  <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white px-4 py-2.5 flex items-center justify-between text-xs font-bold uppercase tracking-wider">
+                    <span className="w-1/2">Project / Event Name</span>
+                    <div className="w-1/2 flex justify-between text-right pl-4">
+                      <span className="w-12 text-center">Qty</span>
+                      <span className="w-24 text-right">Unit Rate</span>
+                      <span className="w-24 text-right">Total (₹)</span>
+                    </div>
+                  </div>
+
+                  <div className="divide-y divide-slate-100 bg-white">
+                    {studioProjects.filter(p => selectedProjectIds[p.id]).length === 0 ? (
+                      <div className="p-4 text-center text-slate-400 text-xs italic">No projects selected for this invoice</div>
+                    ) : (
+                      studioProjects.filter(p => selectedProjectIds[p.id]).map((p) => (
+                        <div key={p.id} className="p-3 flex items-center justify-between text-xs hover:bg-amber-50/30 transition-colors">
+                          <div className="w-1/2 pr-4">
+                            <p className="font-bold text-slate-900 text-sm">{p.coupleName}</p>
+                            <p className="text-slate-500 text-[11px] font-medium">{p.eventType || 'Full Wedding Post-Production & Color Grading'}</p>
+                          </div>
+                          <div className="w-1/2 flex justify-between items-center text-right pl-4">
+                            <span className="w-12 text-center text-slate-600 font-semibold">1</span>
+                            <span className="w-24 text-right text-slate-700 font-semibold">₹{p.projectAmount.toLocaleString('en-IN')}</span>
+                            <span className="w-24 text-right font-black text-slate-900 text-sm">₹{p.projectAmount.toLocaleString('en-IN')}</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ADVANCE PAYMENTS RECEIVED BREAKDOWN SECTION (USER CORE REQUIREMENT) */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                    <IndianRupee className="w-3.5 h-3.5 text-emerald-600" />
+                    2. Advance Payments Received & Mode Breakdown
+                  </h3>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    Verified Receipts
+                  </span>
+                </div>
+
+                <div className="border border-emerald-200/80 rounded-2xl overflow-hidden shadow-xs bg-emerald-50/20">
+                  <div className="bg-emerald-950 text-white px-4 py-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider">
+                    <span className="w-28">Date</span>
+                    <span className="w-36">Received From</span>
+                    <span className="w-36 text-center">Payment Mode</span>
+                    <span className="w-28 text-right">Advance Amount</span>
+                  </div>
+
+                  <div className="divide-y divide-emerald-100 bg-white">
+                    {advanceList.filter(a => a.adjusted).length === 0 ? (
+                      <div className="p-3 text-center text-slate-400 text-xs italic">No advance payment entries adjusted for this invoice</div>
+                    ) : (
+                      advanceList.filter(a => a.adjusted).map((adv) => {
+                        const isCash = adv.paymentMode.toLowerCase().includes('cash');
+                        return (
+                          <div key={adv.id} className="px-4 py-2.5 flex items-center justify-between text-xs hover:bg-emerald-50/30 transition-colors">
+                            <span className="w-28 font-mono text-slate-700 font-medium">
+                              {new Date(adv.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </span>
+                            <span className="w-36 font-bold text-slate-900 truncate pr-2">{adv.paidBy}</span>
+                            <div className="w-36 text-center">
+                              {isCash ? (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1">
+                                  💵 CASH
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-sky-100 text-sky-800 border border-sky-300 inline-flex items-center gap-1">
+                                  💳 ONLINE ({adv.paymentMode})
+                                </span>
+                              )}
+                            </div>
+                            <span className="w-28 text-right font-black text-emerald-700 text-sm">
+                              ₹{adv.amount.toLocaleString('en-IN')}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Advance Payment Mode Summary Bar */}
+                  <div className="bg-emerald-950 text-white px-4 py-2.5 flex flex-wrap items-center justify-between text-xs font-semibold gap-2 border-t border-emerald-800">
+                    <div className="flex flex-wrap items-center gap-2.5 text-[11px]">
+                      <span className="bg-emerald-900/90 px-2.5 py-1 rounded-lg text-emerald-200 border border-emerald-700 flex items-center gap-1">
+                        💵 Cash Received: <strong className="text-white font-black">₹{cashAdvanceTotal.toLocaleString('en-IN')}</strong>
+                      </span>
+                      <span className="bg-sky-900/90 px-2.5 py-1 rounded-lg text-sky-200 border border-sky-700 flex items-center gap-1">
+                        💳 Online Received: <strong className="text-white font-black">₹{onlineAdvanceTotal.toLocaleString('en-IN')}</strong>
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-emerald-300 text-[11px] mr-2 font-medium">Total Advance Adjusted:</span>
+                      <span className="font-black text-amber-400 text-sm sm:text-base">-₹{advanceTotal.toLocaleString('en-IN')}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Payment Info + Summary Ledger */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-1 text-xs">
+                {/* Left: Payment Info & UPI QR Code */}
+                <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 space-y-2 shadow-xs">
+                  <h4 className="font-black text-amber-950 uppercase tracking-wider text-xs flex items-center gap-1.5 border-b border-amber-200 pb-1.5">
+                    <QrCode className="w-4 h-4 text-amber-700" />
+                    Bank & UPI Payment Details
+                  </h4>
+
+                  <div className="flex items-start justify-between gap-3 pt-1">
+                    <div className="space-y-1 text-slate-800 text-[11px]">
+                      <p><span className="text-slate-500 font-medium">A/C Holder Name:</span> <strong className="text-slate-900 block font-bold">{accountHolder}</strong></p>
+                      <p><span className="text-slate-500 font-medium">Bank Name:</span> <strong className="text-slate-900 block font-bold">{bankName}</strong></p>
+                      <p><span className="text-slate-500 font-medium">Account Number:</span> <strong className="text-slate-900 block font-bold font-mono text-xs">{accountNumber}</strong></p>
+                      <p><span className="text-slate-500 font-medium">IFSC Code:</span> <strong className="text-slate-900 block font-bold font-mono">{ifscCode}</strong></p>
+                      <p><span className="text-slate-500 font-medium">UPI ID:</span> <strong className="text-amber-800 block font-bold font-mono text-xs">{upiId}</strong></p>
+                    </div>
+
+                    {/* QR Code Badge */}
+                    <div className="bg-white p-2 rounded-xl border border-amber-300 shadow-sm shrink-0 text-center flex flex-col items-center">
+                      <img src={qrCodeUrl} alt="UPI QR Code" className="w-20 h-20 object-contain mx-auto" />
+                      <span className="text-[9px] font-bold text-amber-800 uppercase block mt-1 tracking-wider">Scan & Pay UPI</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right: Summary Ledger & Remaining Balance Banner */}
+                <div className="bg-slate-900 text-white rounded-2xl p-4 space-y-2 shadow-md flex flex-col justify-between border border-slate-800">
+                  <div className="space-y-1.5 text-slate-300 text-xs">
+                    <div className="flex justify-between py-0.5 border-b border-slate-800">
+                      <span>Sub Total (Selected Projects):</span>
+                      <span className="font-extrabold text-white">₹{selectedProjectsTotal.toLocaleString('en-IN')}</span>
+                    </div>
+
+                    {previousBalance > 0 && (
+                      <div className="flex justify-between py-0.5 border-b border-slate-800">
+                        <span>Previous Pending Balance:</span>
+                        <span className="font-extrabold text-amber-400">+₹{previousBalance.toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between py-0.5 border-b border-slate-800 text-emerald-400 font-semibold">
+                      <span>Total Advance Adjusted:</span>
+                      <span>-₹{advanceTotal.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 text-right -mt-1 font-mono">
+                      (Cash: ₹{cashAdvanceTotal.toLocaleString('en-IN')} | Online: ₹{onlineAdvanceTotal.toLocaleString('en-IN')})
+                    </div>
+
+                    {discount > 0 && (
+                      <div className="flex justify-between py-0.5 border-b border-slate-800 text-red-400 font-semibold">
+                        <span>Special Discount:</span>
+                        <span>-₹{discount.toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* REMAINING PAYABLE BALANCE PILL BANNER */}
+                  <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 rounded-xl p-3 font-black flex items-center justify-between shadow-lg mt-2">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase tracking-widest text-slate-900 font-extrabold">REMAINING BALANCE DUE</span>
+                      <span className="text-xs text-slate-900 font-bold">Net Final Payable Amount</span>
+                    </div>
+                    <span className="text-xl sm:text-2xl font-black font-mono tracking-tight text-slate-950">
+                      ₹{totalPayable.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Terms & Conditions + Signature */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2 border-t border-slate-200 text-xs items-end">
+                <div>
+                  <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[11px] block mb-1">Terms & Conditions:</h4>
+                  <p className="text-slate-500 text-[11px] leading-relaxed">
+                    {notes || 'Thank you for choosing The Frame Cuts Studio for your post-production & cinematic video editing services. Payment is requested as per agreed project deliverables. All files delivered via Google Drive.'}
+                  </p>
+                </div>
+
+                <div className="text-right space-y-1 pt-4 sm:pt-0">
+                  <div className="w-40 border-b border-slate-800 ml-auto mb-1"></div>
+                  <p className="font-black text-slate-900 text-xs uppercase">{currentStudio?.ownerName || 'Satish Tiwari'}</p>
+                  <p className="text-[10px] text-amber-800 font-bold uppercase tracking-wider">Authorized Signatory — The Frame Cut Studio</p>
+                </div>
+              </div>
+
+              {/* Bottom Thanks Banner Badge */}
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-100">
+                <div className="bg-gradient-to-r from-amber-100 to-amber-200 text-amber-950 border border-amber-300 rounded-full px-5 py-1.5 font-black italic text-xs shadow-xs">
+                  ✨ Thanks For Your Business! — The Frame Cut Studio
+                </div>
+
+                {driveLink && (
+                  <div className="text-right text-xs">
+                    <span className="font-bold text-slate-700">Google Drive Delivery: </span>
+                    <a href={driveLink} target="_blank" rel="noreferrer" className="text-blue-600 underline font-bold">
+                      Click to Open Files
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex flex-wrap items-center justify-end gap-3 pt-4 border-t border-slate-200 print:hidden">
+                <button
+                  onClick={() => setShowPreviewModal(false)}
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:bg-slate-100 text-xs font-semibold cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={handleGenerateAndAttachPDF}
+                  disabled={isGeneratingPdf}
+                  className="px-5 py-2 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isGeneratingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileCheck className="w-4 h-4" />}
+                  {isGeneratingPdf ? 'Attaching...' : 'Generate & Attach PDF'}
+                </button>
+                <button
+                  onClick={handleWhatsAppSend}
+                  disabled={isGeneratingPdf}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isGeneratingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {isGeneratingPdf ? 'Preparing...' : 'Send to WhatsApp'}
+                </button>
+                <button
+                  onClick={handleGeneratePDF}
+                  disabled={isGeneratingPdf}
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isGeneratingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+                  {isGeneratingPdf ? 'Generating PDF...' : 'Download PDF'}
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  Print Invoice
+                </button>
+              </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </div>
+      )}
+
+      {/* ================= OFF-SCREEN PRINTABLE INVOICE TEMPLATE (FOR PDF EXPORT) ================= */}
+      <div className="fixed top-0 left-[-9999px] pointer-events-none z-[-9999] overflow-visible" aria-hidden="true">
+        <div 
+          id="printable-invoice-container" 
+          ref={printInvoiceRef} 
+          className="w-[800px] bg-white text-slate-900 p-8 space-y-6 relative overflow-visible font-sans border border-slate-200"
+          style={{ opacity: 1, backgroundColor: '#ffffff', color: '#0f172a', overflow: 'visible' }}
+        >
+          {/* Background Watermark Logo */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20 select-none z-0">
+            <Logo size={360} showText={true} variant="gold" />
+          </div>
+
+          <div className="relative z-10 space-y-6">
+            {/* Top Header Banner */}
+            <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 text-white rounded-2xl p-5 shadow-lg flex justify-between items-center gap-4 border border-amber-500/30">
+              <div className="flex items-center gap-3.5">
+                <div className="p-2 bg-amber-500/10 rounded-xl border border-amber-500/20 shrink-0">
+                  <Logo size={48} variant="gold" />
+                </div>
+                <div>
+                  <span className="text-[9px] font-black tracking-widest text-amber-400 uppercase bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full inline-block mb-1">
+                    CINEMATIC WEDDING SUITE & POST PRODUCTION
+                  </span>
+                  <h1 className="text-2xl font-black tracking-wider text-white font-display">
+                    THE FRAME CUTS STUDIO
+                  </h1>
+                  <p className="text-[11px] text-slate-300 font-medium">Email: contact@theframecuts.com | Phone: +91 77729 99933</p>
+                </div>
+              </div>
+
+              {/* Tax Invoice Pill Badge */}
+              <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-orange-600 text-slate-950 px-5 py-3 rounded-2xl shadow-md text-right min-w-[200px] font-bold">
+                <h2 className="text-lg font-black uppercase tracking-widest text-slate-950">TAX INVOICE</h2>
+                <div className="text-[11px] text-slate-900 space-y-0.5 mt-1 font-mono">
+                  <p>Invoice #: <span className="font-extrabold text-slate-950">{invoiceNo}</span></p>
+                  <p>Date: <span className="font-extrabold text-slate-950">{invoiceDate}</span></p>
+                  <p>Status: <span className="font-black text-emerald-950 bg-emerald-400/80 px-2 py-0.5 rounded-full uppercase text-[9px]">{totalPayable === 0 ? 'PAID IN FULL' : 'PARTIAL / ADVANCE SETTLED'}</span></p>
+                </div>
+              </div>
+            </div>
+
+            {/* Bill To & Issued By Cards */}
+            <div className="grid grid-cols-2 gap-4 text-xs">
+              <div className="bg-slate-50/90 border border-slate-200 rounded-2xl p-4 shadow-xs space-y-1">
+                <span className="text-[10px] uppercase font-black tracking-wider text-orange-600 bg-orange-100/80 px-2.5 py-0.5 rounded-full inline-block mb-1">
+                  Invoice To (Client Studio):
+                </span>
+                <p className="text-base font-black text-slate-900">{currentStudio?.name || 'Wedding By KK'}</p>
+                <p className="text-slate-600 font-medium">{currentStudio?.ownerName ? `Attn: ${currentStudio.ownerName}` : 'Attn: Studio Director'}</p>
+                <p className="text-slate-500">{currentStudio?.phone || '+91 98260 00000'}</p>
+              </div>
+
+              <div className="bg-slate-50/90 border border-slate-200 rounded-2xl p-4 shadow-xs space-y-1 text-right">
+                <span className="text-[10px] uppercase font-black tracking-wider text-emerald-700 bg-emerald-100/80 px-2.5 py-0.5 rounded-full inline-block mb-1">
+                  Payment Receiver (Studio Admin):
+                </span>
+                <p className="text-base font-black text-slate-900">THE FRAME CUTS STUDIO</p>
+                <p className="text-slate-600 font-medium">Satish Tiwari — Founder & Lead Director</p>
+                <p className="text-slate-500">Raipur, Chhattisgarh, India</p>
+              </div>
+            </div>
+
+            {/* Project Line Items Table */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                  <Film className="w-3.5 h-3.5 text-amber-600" />
+                  1. Project Services & Deliverables
+                </h3>
+              </div>
+
+              <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+                <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white px-4 py-2.5 flex items-center justify-between text-xs font-bold uppercase tracking-wider">
+                  <span className="w-1/2">Project / Event Name</span>
+                  <div className="w-1/2 flex justify-between text-right pl-4">
+                    <span className="w-12 text-center">Qty</span>
+                    <span className="w-24 text-right">Unit Rate</span>
+                    <span className="w-24 text-right">Total (₹)</span>
+                  </div>
+                </div>
+
+                <div className="divide-y divide-slate-100 bg-white">
+                  {studioProjects.filter(p => selectedProjectIds[p.id]).map((p) => (
+                    <div key={p.id} className="p-3 flex items-center justify-between text-xs">
+                      <div className="w-1/2 pr-4">
+                        <p className="font-bold text-slate-900 text-sm">{p.coupleName}</p>
+                        <p className="text-slate-500 text-[11px] font-medium">{p.eventType || 'Full Wedding Post-Production & Color Grading'}</p>
+                      </div>
+                      <div className="w-1/2 flex justify-between items-center text-right pl-4">
+                        <span className="w-12 text-center text-slate-600 font-semibold">1</span>
+                        <span className="w-24 text-right text-slate-700 font-semibold">₹{p.projectAmount.toLocaleString('en-IN')}</span>
+                        <span className="w-24 text-right font-black text-slate-900 text-sm">₹{p.projectAmount.toLocaleString('en-IN')}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ADVANCE PAYMENTS RECEIVED BREAKDOWN SECTION */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                  <IndianRupee className="w-3.5 h-3.5 text-emerald-600" />
+                  2. Advance Payments Received & Mode Breakdown
+                </h3>
+              </div>
+
+              <div className="border border-emerald-200/80 rounded-2xl overflow-hidden shadow-xs bg-emerald-50/20">
+                <div className="bg-emerald-950 text-white px-4 py-2 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider">
+                  <span className="w-28">Date</span>
+                  <span className="w-36">Received From</span>
+                  <span className="w-36 text-center">Payment Mode</span>
+                  <span className="w-28 text-right">Advance Amount</span>
+                </div>
+
+                <div className="divide-y divide-emerald-100 bg-white">
+                  {advanceList.filter(a => a.adjusted).map((adv) => {
+                    const isCash = adv.paymentMode.toLowerCase().includes('cash');
+                    return (
+                      <div key={adv.id} className="px-4 py-2.5 flex items-center justify-between text-xs">
+                        <span className="w-28 font-mono text-slate-700 font-medium">
+                          {new Date(adv.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </span>
+                        <span className="w-36 font-bold text-slate-900 truncate pr-2">{adv.paidBy}</span>
+                        <div className="w-36 text-center">
+                          {isCash ? (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1">
+                              💵 CASH
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-sky-100 text-sky-800 border border-sky-300 inline-flex items-center gap-1">
+                              💳 ONLINE ({adv.paymentMode})
+                            </span>
+                          )}
+                        </div>
+                        <span className="w-28 text-right font-black text-emerald-700 text-sm">
+                          ₹{adv.amount.toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Advance Payment Mode Summary Bar */}
+                <div className="bg-emerald-950 text-white px-4 py-2.5 flex items-center justify-between text-xs font-semibold gap-2 border-t border-emerald-800">
+                  <div className="flex items-center gap-3 text-[11px]">
+                    <span className="bg-emerald-900 px-2.5 py-1 rounded-lg text-emerald-200 border border-emerald-700">
+                      💵 Cash Received: <strong className="text-white font-black">₹{cashAdvanceTotal.toLocaleString('en-IN')}</strong>
+                    </span>
+                    <span className="bg-sky-900 px-2.5 py-1 rounded-lg text-sky-200 border border-sky-700">
+                      💳 Online Received: <strong className="text-white font-black">₹{onlineAdvanceTotal.toLocaleString('en-IN')}</strong>
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-emerald-300 text-[11px] mr-2">Total Advance Adjusted:</span>
+                    <span className="font-black text-amber-400 text-base">-₹{advanceTotal.toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Payment Info + Summary Ledger */}
+            <div className="grid grid-cols-2 gap-5 pt-1 text-xs">
+              {/* Left: Payment Info & UPI QR Code */}
+              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 space-y-2 shadow-xs">
+                <h4 className="font-black text-amber-950 uppercase tracking-wider text-xs flex items-center gap-1.5 border-b border-amber-200 pb-1.5">
+                  <QrCode className="w-4 h-4 text-amber-700" />
+                  Bank & UPI Payment Details
+                </h4>
+
+                <div className="flex items-start justify-between gap-3 pt-1">
+                  <div className="space-y-1 text-slate-800 text-[11px]">
+                    <p><span className="text-slate-500 font-medium">A/C Holder Name:</span> <strong className="text-slate-900 block font-bold">{accountHolder}</strong></p>
+                    <p><span className="text-slate-500 font-medium">Bank Name:</span> <strong className="text-slate-900 block font-bold">{bankName}</strong></p>
+                    <p><span className="text-slate-500 font-medium">Account Number:</span> <strong className="text-slate-900 block font-bold font-mono text-xs">{accountNumber}</strong></p>
+                    <p><span className="text-slate-500 font-medium">IFSC Code:</span> <strong className="text-slate-900 block font-bold font-mono">{ifscCode}</strong></p>
+                    <p><span className="text-slate-500 font-medium">UPI ID:</span> <strong className="text-amber-800 block font-bold font-mono text-xs">{upiId}</strong></p>
+                  </div>
+
+                  {/* QR Code Badge */}
+                  <div className="bg-white p-2 rounded-xl border border-amber-300 shadow-sm shrink-0 text-center flex flex-col items-center">
+                    <img src={qrCodeUrl} alt="UPI QR Code" className="w-20 h-20 object-contain mx-auto" />
+                    <span className="text-[9px] font-bold text-amber-800 uppercase block mt-1 tracking-wider">Scan & Pay UPI</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right: Summary Ledger & Remaining Balance Banner */}
+              <div className="bg-slate-900 text-white rounded-2xl p-4 space-y-2 shadow-md flex flex-col justify-between border border-slate-800">
+                <div className="space-y-1.5 text-slate-300 text-xs">
+                  <div className="flex justify-between py-0.5 border-b border-slate-800">
+                    <span>Sub Total (Selected Projects):</span>
+                    <span className="font-extrabold text-white">₹{selectedProjectsTotal.toLocaleString('en-IN')}</span>
+                  </div>
+
+                  {previousBalance > 0 && (
+                    <div className="flex justify-between py-0.5 border-b border-slate-800">
+                      <span>Previous Pending Balance:</span>
+                      <span className="font-extrabold text-amber-400">+₹{previousBalance.toLocaleString('en-IN')}</span>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between py-0.5 border-b border-slate-800 text-emerald-400 font-semibold">
+                    <span>Total Advance Adjusted:</span>
+                    <span>-₹{advanceTotal.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 text-right -mt-1 font-mono">
+                    (Cash: ₹{cashAdvanceTotal.toLocaleString('en-IN')} | Online: ₹{onlineAdvanceTotal.toLocaleString('en-IN')})
+                  </div>
+
+                  {discount > 0 && (
+                    <div className="flex justify-between py-0.5 border-b border-slate-800 text-red-400 font-semibold">
+                      <span>Special Discount:</span>
+                      <span>-₹{discount.toLocaleString('en-IN')}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* REMAINING PAYABLE BALANCE PILL BANNER */}
+                <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 rounded-xl p-3 font-black flex items-center justify-between shadow-lg mt-2">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] uppercase tracking-widest text-slate-900 font-extrabold">REMAINING BALANCE DUE</span>
+                    <span className="text-xs text-slate-900 font-bold">Net Final Payable Amount</span>
+                  </div>
+                  <span className="text-2xl font-black font-mono tracking-tight text-slate-950">
+                    ₹{totalPayable.toLocaleString('en-IN')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Terms & Conditions + Signature */}
+            <div className="grid grid-cols-2 gap-6 pt-2 border-t border-slate-200 text-xs items-end">
+              <div>
+                <h4 className="font-bold text-slate-800 uppercase tracking-wider text-[11px] block mb-1">Terms & Conditions:</h4>
+                <p className="text-slate-500 text-[11px] leading-relaxed">
+                  {notes || 'Thank you for choosing The Frame Cuts Studio for your post-production & cinematic video editing services. Payment is requested as per agreed project deliverables. All files delivered via Google Drive.'}
+                </p>
+              </div>
+
+              <div className="text-right space-y-1">
+                <div className="w-40 border-b border-slate-800 ml-auto mb-1"></div>
+                <p className="font-black text-slate-900 text-xs uppercase">{currentStudio?.ownerName || 'Satish Tiwari'}</p>
+                <p className="text-[10px] text-amber-800 font-bold uppercase tracking-wider">Authorized Signatory — The Frame Cut Studio</p>
+              </div>
+            </div>
+
+            {/* Bottom Thanks Banner Badge */}
+            <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-100">
+              <div className="bg-gradient-to-r from-amber-100 to-amber-200 text-amber-950 border border-amber-300 rounded-full px-5 py-1.5 font-black italic text-xs shadow-xs">
+                ✨ Thanks For Your Business! — The Frame Cut Studio
+              </div>
+
+              {driveLink && (
+                <div className="text-right text-xs">
+                  <span className="font-bold text-slate-700">Google Drive Delivery: </span>
+                  <a href={driveLink} target="_blank" rel="noreferrer" className="text-blue-600 underline font-bold">
+                    {driveLink}
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ================= SAVED INVOICE DRAFTS ================= */}
+      {invoices.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4 print:hidden">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <FileText className="w-5 h-5 text-amber-500" /> Saved Invoices & Drafts History
+            </h3>
+            <span className="text-xs font-mono font-bold bg-amber-500/10 text-amber-400 px-3 py-1 rounded-full border border-amber-500/20">
+              {invoices.length} Saved
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {invoices.map((inv) => (
+              <div key={inv.id} className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 flex flex-col justify-between space-y-3 hover:border-amber-500/30 transition-all">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="text-xs font-mono text-amber-400 font-bold">{inv.invoiceNo}</span>
+                    <h4 className="text-sm font-bold text-white mt-0.5">{inv.studioName || 'Studio Invoice'}</h4>
+                    <p className="text-xs text-slate-400 font-mono mt-0.5">{inv.date}</p>
+                  </div>
+                  <span className="text-sm font-extrabold text-emerald-400">
+                    ₹{(inv.totalPayable || 0).toLocaleString('en-IN')}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 border-t border-slate-800/80 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (inv.invoiceNo) setInvoiceNo(inv.invoiceNo);
+                      if (inv.date) setInvoiceDate(inv.date);
+                      if (inv.studioId) setSelectedStudioId(inv.studioId);
+                      if (inv.notes) setNotes(inv.notes);
+                      if (inv.driveLink) setDriveLink(inv.driveLink);
+                      showToast(`Loaded invoice ${inv.invoiceNo}`);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-amber-300 text-xs font-mono font-bold transition-colors cursor-pointer"
+                  >
+                    Load Invoice
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (onDeleteInvoiceDraft && inv.id) {
+                        await onDeleteInvoiceDraft(inv.id);
+                        showToast(`Deleted invoice draft ${inv.invoiceNo}`);
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-red-500/20 text-red-400 text-xs font-mono font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+        </>
+      )}
+
     </div>
   );
 }

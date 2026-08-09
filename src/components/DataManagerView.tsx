@@ -23,6 +23,7 @@ import { Project } from '../types';
 interface DataManagerViewProps {
   projects: Project[];
   onUpdateProject: (id: string, updates: Partial<Project>) => Promise<void>;
+  onDeleteProject?: (id: string) => Promise<void>;
 }
 
 export default function DataManagerView({ projects, onUpdateProject }: DataManagerViewProps) {

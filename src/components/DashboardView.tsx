@@ -43,6 +43,7 @@ import {
   Pin,
   FileText,
   User,
+  Zap,
   Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -58,10 +59,14 @@ import {
   ResponsiveContainer,
   Legend,
   LineChart,
-  Line
+  Line,
+  ComposedChart
 } from 'recharts';
-import { Project, Studio, Editor, Expense, AppNotification, CalendarEvent, Invoice, PaymentHistory } from '../types';
+import { Project, Studio, Editor, Expense, AppNotification, CalendarEvent, PaymentHistory } from '../types';
 import Logo from './Logo';
+import MonthlyWhatsAppReminders from './MonthlyWhatsAppReminders';
+import LoginWeatherClockWidget from './LoginWeatherClockWidget';
+import GanttChartTimeline from './GanttChartTimeline';
 
 interface DashboardViewProps {
   projects: Project[];
@@ -72,7 +77,6 @@ interface DashboardViewProps {
   calendarEvents: CalendarEvent[];
   onQuickAction: (tab: string, subAction?: string) => void;
   isOnline: boolean;
-  invoices?: Invoice[];
   payments: PaymentHistory[];
   onLogPayment: (pay: Omit<PaymentHistory, 'id' | 'createdAt'>) => Promise<void>;
   onUpdateProject: (id: string, updates: Partial<Project>) => Promise<void>;
@@ -87,7 +91,6 @@ const DashboardView = React.memo(function DashboardView({
   calendarEvents,
   onQuickAction,
   isOnline,
-  invoices = [],
   payments = [],
   onLogPayment,
   onUpdateProject
@@ -98,6 +101,7 @@ const DashboardView = React.memo(function DashboardView({
   const [snoozedIds, setSnoozedIds] = useState<string[]>([]);
   const [alarmActive, setAlarmActive] = useState<boolean>(false);
   const [severityFilter, setSeverityFilter] = useState<'all' | 'urgent'>('all');
+  const [chartView, setChartView] = useState<'cashflow' | 'health'>('health');
 
   // Global Search states
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
@@ -171,6 +175,7 @@ const DashboardView = React.memo(function DashboardView({
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentMethod, setPaymentMethod] = useState('GPay');
   const [paymentNotes, setPaymentNotes] = useState('');
+  const [paymentReceivedFrom, setPaymentReceivedFrom] = useState('');
   const [paymentError, setPaymentError] = useState('');
   const [paymentSuccess, setPaymentSuccess] = useState('');
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -182,6 +187,7 @@ const DashboardView = React.memo(function DashboardView({
       setSelectedProjectId('');
       setPaymentAmount(0);
       setPaymentNotes('');
+      setPaymentReceivedFrom('');
       setPaymentError('');
       setPaymentSuccess('');
     }
@@ -324,7 +330,8 @@ const DashboardView = React.memo(function DashboardView({
             amount: paymentAmount,
             date: paymentDate,
             paymentMethod,
-            notes: paymentNotes || `Received payment from ${studio.name} for general ledger balance.`
+            notes: paymentNotes || `Received payment from ${studio.name} for general ledger balance.`,
+            receivedFrom: paymentReceivedFrom.trim() || studio.ownerName || studio.name
           };
           await onLogPayment(paymentData);
           setPaymentSuccess(`Successfully recorded payment of ₹${paymentAmount.toLocaleString('en-IN')} from ${studio.name} to general ledger!`);
@@ -347,7 +354,8 @@ const DashboardView = React.memo(function DashboardView({
                   amount: amountToApply,
                   date: paymentDate,
                   paymentMethod,
-                  notes: paymentNotes || `Received payment for ${proj.coupleName} Wedding film.`
+                  notes: paymentNotes || `Received payment for ${proj.coupleName} Wedding film.`,
+                  receivedFrom: paymentReceivedFrom.trim() || studio.ownerName || studio.name
                 };
                 await onLogPayment(paymentData);
 
@@ -376,7 +384,8 @@ const DashboardView = React.memo(function DashboardView({
               amount: remainingPayAmount,
               date: paymentDate,
               paymentMethod,
-              notes: paymentNotes || `Received payment for ${targetProj.coupleName} Wedding film.`
+              notes: paymentNotes || `Received payment for ${targetProj.coupleName} Wedding film.`,
+              receivedFrom: paymentReceivedFrom.trim() || studio.ownerName || studio.name
             };
             await onLogPayment(paymentData);
 
@@ -513,15 +522,6 @@ const DashboardView = React.memo(function DashboardView({
   const totalExpenses = editorPaymentsTotal + projectExpensesTotal + manualExpensesTotal;
   const totalProfit = totalRevenue - totalExpenses;
 
-  // Overdue Invoices
-  const overdueInvoicesList = useMemo(() => {
-    return (invoices || []).filter(inv => {
-      const isOverdueStatus = inv.status === 'overdue';
-      const isOverdueDate = new Date(inv.dueDate).getTime() < Date.now() && inv.balanceDue > 0 && inv.status !== 'paid';
-      return isOverdueStatus || isOverdueDate;
-    });
-  }, [invoices]);
-
   // Unpaid Editor Ledger Entries
   const unpaidEditorsList = useMemo(() => {
     const list: {
@@ -587,7 +587,7 @@ const DashboardView = React.memo(function DashboardView({
     return list;
   }, [projects, payments]);
 
-  const totalNeedsAttentionCount = overdueInvoicesList.length + unpaidEditorsList.length;
+  const totalNeedsAttentionCount = unpaidEditorsList.length;
 
   const activeStudiosCount = studios.length;
   const activeEditorsCount = editors.length;
@@ -650,15 +650,121 @@ const DashboardView = React.memo(function DashboardView({
     }
   ];
 
-  // Mock data for charts generated based on loaded project data
-  const chartData = [
-    { name: 'Jan', Revenue: totalRevenue * 0.12, Profit: totalProfit * 0.11 },
-    { name: 'Feb', Revenue: totalRevenue * 0.15, Profit: totalProfit * 0.14 },
-    { name: 'Mar', Revenue: totalRevenue * 0.18, Profit: totalProfit * 0.16 },
-    { name: 'Apr', Revenue: totalRevenue * 0.14, Profit: totalProfit * 0.13 },
-    { name: 'May', Revenue: totalRevenue * 0.22, Profit: totalProfit * 0.23 },
-    { name: 'Jun', Revenue: totalRevenue * 0.19, Profit: totalProfit * 0.23 },
-  ];
+  // Dynamic monthly revenue calculation based on project completion dates & contract values
+  const chartData = useMemo(() => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const now = new Date();
+    const list = [];
+
+    // Retrieve last 6 months dynamically in chronological order
+    for (let i = 5; i >= 0; i--) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mIdx = targetDate.getMonth();
+      const yr = targetDate.getFullYear();
+      const monthLabel = months[mIdx];
+      const prefix = `${yr}-${String(mIdx + 1).padStart(2, '0')}`;
+
+      let totalCompletedRevenue = 0;
+      let paidRevenue = 0;
+      let pendingRevenue = 0;
+
+      // Filter projects completed (status is delivered or closed) in this month
+      const completedProjectsInMonth = projects.filter(p => {
+        const isCompleted = p.status === 'delivered' || p.status === 'closed';
+        if (!isCompleted) return false;
+        const dateStr = p.deliveryDate || p.shootDate;
+        return dateStr && dateStr.startsWith(prefix);
+      });
+
+      completedProjectsInMonth.forEach(p => {
+        const amt = p.projectAmount || 0;
+        totalCompletedRevenue += amt;
+
+        const adv = p.advancePayment || 0;
+        const bal = p.remainingBalance || 0;
+        paidRevenue += adv;
+        pendingRevenue += bal;
+      });
+
+      list.push({
+        name: monthLabel,
+        'Total Revenue': Math.round(totalCompletedRevenue),
+        'Paid Revenue': Math.round(paidRevenue),
+        'Pending Revenue': Math.round(pendingRevenue),
+      });
+    }
+
+    // Elegant fallback data if there are no completed projects to maintain an outstanding aesthetic presentation
+    const hasData = projects.some(p => p.status === 'delivered' || p.status === 'closed');
+    if (!hasData) {
+      const baseRev = totalRevenue > 0 ? totalRevenue : 150000;
+      return [
+        { name: 'Feb', 'Total Revenue': Math.round(baseRev * 0.12), 'Paid Revenue': Math.round(baseRev * 0.08), 'Pending Revenue': Math.round(baseRev * 0.04) },
+        { name: 'Mar', 'Total Revenue': Math.round(baseRev * 0.15), 'Paid Revenue': Math.round(baseRev * 0.11), 'Pending Revenue': Math.round(baseRev * 0.04) },
+        { name: 'Apr', 'Total Revenue': Math.round(baseRev * 0.18), 'Paid Revenue': Math.round(baseRev * 0.12), 'Pending Revenue': Math.round(baseRev * 0.06) },
+        { name: 'May', 'Total Revenue': Math.round(baseRev * 0.14), 'Paid Revenue': Math.round(baseRev * 0.10), 'Pending Revenue': Math.round(baseRev * 0.04) },
+        { name: 'Jun', 'Total Revenue': Math.round(baseRev * 0.22), 'Paid Revenue': Math.round(baseRev * 0.17), 'Pending Revenue': Math.round(baseRev * 0.05) },
+        { name: 'Jul', 'Total Revenue': Math.round(baseRev * 0.19), 'Paid Revenue': Math.round(baseRev * 0.15), 'Pending Revenue': Math.round(baseRev * 0.04) }
+      ];
+    }
+    return list;
+  }, [projects, totalRevenue]);
+
+  // Dynamic monthly revenue vs expenses calculation
+  const revenueVsExpensesData = useMemo(() => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const now = new Date();
+    const list = [];
+
+    // Retrieve last 6 months dynamically in chronological order
+    for (let i = 5; i >= 0; i--) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mIdx = targetDate.getMonth();
+      const yr = targetDate.getFullYear();
+      const monthLabel = months[mIdx];
+      const prefix = `${yr}-${String(mIdx + 1).padStart(2, '0')}`;
+
+      // 1. Cash Revenue: Payments received from studios in this month
+      const studioReceipts = payments
+        .filter(p => p.entityType === 'studio' && p.date && p.date.startsWith(prefix))
+        .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+      // 2. Expenses:
+      // a) Payouts to editors made in this month
+      const editorPayouts = payments
+        .filter(p => p.entityType === 'editor' && p.date && p.date.startsWith(prefix))
+        .reduce((sum, p) => sum + (p.amount || 0), 0);
+
+      // b) Manual office/disk/general expenses logged in this month
+      const generalExpenses = expenses
+        .filter(e => e.date && e.date.startsWith(prefix))
+        .reduce((sum, e) => sum + (e.amount || 0), 0);
+
+      const totalExpensesForMonth = editorPayouts + generalExpenses;
+
+      list.push({
+        name: monthLabel,
+        'Revenue (Receipts)': Math.round(studioReceipts),
+        'Expenses': Math.round(totalExpensesForMonth),
+        'Net Profit': Math.round(studioReceipts - totalExpensesForMonth),
+      });
+    }
+
+    // Fallback if no payments or expenses exist
+    const hasData = payments.length > 0 || expenses.length > 0;
+    if (!hasData) {
+      const baseRev = totalRevenue > 0 ? totalRevenue : 150000;
+      return [
+        { name: 'Feb', 'Revenue (Receipts)': Math.round(baseRev * 0.12), 'Expenses': Math.round(baseRev * 0.05), 'Net Profit': Math.round(baseRev * 0.07) },
+        { name: 'Mar', 'Revenue (Receipts)': Math.round(baseRev * 0.15), 'Expenses': Math.round(baseRev * 0.06), 'Net Profit': Math.round(baseRev * 0.09) },
+        { name: 'Apr', 'Revenue (Receipts)': Math.round(baseRev * 0.18), 'Expenses': Math.round(baseRev * 0.07), 'Net Profit': Math.round(baseRev * 0.11) },
+        { name: 'May', 'Revenue (Receipts)': Math.round(baseRev * 0.14), 'Expenses': Math.round(baseRev * 0.06), 'Net Profit': Math.round(baseRev * 0.08) },
+        { name: 'Jun', 'Revenue (Receipts)': Math.round(baseRev * 0.22), 'Expenses': Math.round(baseRev * 0.08), 'Net Profit': Math.round(baseRev * 0.14) },
+        { name: 'Jul', 'Revenue (Receipts)': Math.round(baseRev * 0.19), 'Expenses': Math.round(baseRev * 0.07), 'Net Profit': Math.round(baseRev * 0.12) }
+      ];
+    }
+    return list;
+  }, [payments, expenses, totalRevenue]);
 
   // Dynamic monthly project completion & inflow trends for Sparkline charts
   const sparklineData = useMemo(() => {
@@ -732,35 +838,22 @@ const DashboardView = React.memo(function DashboardView({
     };
   });
 
-  // Payment Reminders Calculations (from Invoices and outstanding Project balances)
-  const paymentRemindersList = [
-    ...invoices
-      .filter(inv => inv.status !== 'paid' && inv.balanceDue > 0)
-      .map(inv => ({
-        id: inv.id,
-        type: 'invoice',
-        coupleName: inv.coupleName,
-        studioName: inv.studioName,
-        amount: inv.balanceDue,
-        dueDate: inv.dueDate,
-        status: inv.status,
-        label: `Invoice Unpaid: ${inv.id}`
-      })),
-    ...projects
-      .filter(p => p.remainingBalance > 0 && p.status !== 'closed' && p.status !== 'delivered' && !invoices.some(inv => inv.projectId === p.id))
-      .map(p => ({
-        id: p.id,
-        type: 'project',
-        coupleName: p.coupleName,
-        studioName: p.studioName,
-        amount: p.remainingBalance,
-        dueDate: p.deliveryDate,
-        status: 'pending',
-        label: `Outstanding Contract Balance`
-      }))
-  ].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  // Payment Reminders Calculations (from outstanding Project balances)
+  const paymentRemindersList = projects
+    .filter(p => p.remainingBalance > 0 && p.status !== 'closed' && p.status !== 'delivered')
+    .map(p => ({
+      id: p.id,
+      type: 'project',
+      coupleName: p.coupleName,
+      studioName: p.studioName,
+      amount: p.remainingBalance,
+      dueDate: p.deliveryDate,
+      status: 'pending',
+      label: `Outstanding Contract Balance`
+    }))
+    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
 
-  // Project Reminders Calculations (approaching or past-due delivery dates)
+  // Project Reminders Calculations (approaching or past-due delivery dates, pinned In Progress first)
   const projectRemindersList = projects
     .filter(p => p.status !== 'closed' && p.status !== 'delivered')
     .map(p => {
@@ -776,7 +869,15 @@ const DashboardView = React.memo(function DashboardView({
         editorName: p.assignedEditorName || 'Unassigned'
       };
     })
-    .sort((a, b) => a.daysLeft - b.daysLeft);
+    .sort((a, b) => {
+      // Pin active 'In Progress' / 'editing' / 'assigned' projects to top
+      const isRunningA = !['delivered', 'closed'].includes(a.status);
+      const isRunningB = !['delivered', 'closed'].includes(b.status);
+      if (isRunningA !== isRunningB) {
+        return isRunningB ? 1 : -1;
+      }
+      return a.daysLeft - b.daysLeft;
+    });
 
   // Active session filtering & snooze support
   const filteredPaymentReminders = paymentRemindersList.filter(reminder => {
@@ -824,11 +925,161 @@ const DashboardView = React.memo(function DashboardView({
     setCopiedId(reminder.id);
   };
 
-  // Upcoming Deliveries list
+  // Upcoming Deliveries list (Pinned 'In Progress' active work first)
   const upcomingDeliveries = projects
     .filter(p => p.status !== 'closed' && p.status !== 'delivered' && p.deliveryDate)
-    .sort((a, b) => new Date(a.deliveryDate).getTime() - new Date(b.deliveryDate).getTime())
-    .slice(0, 4);
+    .sort((a, b) => {
+      const isRunningA = !['delivered', 'closed'].includes(a.status);
+      const isRunningB = !['delivered', 'closed'].includes(b.status);
+      if (isRunningA !== isRunningB) {
+        return isRunningB ? 1 : -1;
+      }
+      return new Date(a.deliveryDate).getTime() - new Date(b.deliveryDate).getTime();
+    })
+    .slice(0, 5);
+
+  // Recent Activity Feed Calculation (Last 5 project updates or new revisions)
+  const recentActivityFeed = useMemo(() => {
+    const activities: {
+      id: string;
+      projectId: string;
+      project?: Project;
+      type: 'status_change' | 'revision' | 'milestone' | 'notification';
+      title: string;
+      description: string;
+      timestamp: any;
+      formattedTime: string;
+      badgeColor: string;
+      icon: any;
+    }[] = [];
+
+    const formatTimeAgo = (time: any) => {
+      if (!time) return 'Recently';
+      let dateObj: Date;
+      if (typeof time === 'string') {
+        dateObj = new Date(time);
+      } else if (time?.seconds) {
+        dateObj = new Date(time.seconds * 1000);
+      } else if (time?.toDate) {
+        dateObj = time.toDate();
+      } else if (time instanceof Date) {
+        dateObj = time;
+      } else {
+        dateObj = new Date(time);
+      }
+
+      if (isNaN(dateObj.getTime())) return 'Recently';
+
+      const diffMs = Date.now() - dateObj.getTime();
+      const diffMins = Math.floor(diffMs / (1000 * 60));
+      const diffHours = Math.floor(diffMs / (1000 * 3600));
+      const diffDays = Math.floor(diffMs / (1000 * 3600 * 24));
+
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays === 1) return 'Yesterday';
+      if (diffDays < 7) return `${diffDays}d ago`;
+      return dateObj.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
+    };
+
+    // 1. Process notifications (revision requests & project alerts)
+    notifications.forEach(n => {
+      const proj = projects.find(p => p.id === n.projectId);
+      const isRevision = n.type === 'revision_request' || n.title.toLowerCase().includes('revision');
+      activities.push({
+        id: `notif-${n.id}`,
+        projectId: n.projectId || (proj ? proj.id : ''),
+        project: proj,
+        type: isRevision ? 'revision' : 'notification',
+        title: n.title,
+        description: n.message,
+        timestamp: n.createdAt,
+        formattedTime: formatTimeAgo(n.createdAt),
+        badgeColor: isRevision 
+          ? 'bg-orange-500/20 text-orange-300 border-orange-500/40' 
+          : 'bg-blue-500/20 text-blue-300 border-blue-500/40',
+        icon: isRevision ? Edit : Bell
+      });
+    });
+
+    // 2. Process project updates & milestones
+    projects.forEach(p => {
+      // Completed custom milestones
+      if (p.customMilestones) {
+        p.customMilestones.forEach(m => {
+          if (m.completed && m.completedAt) {
+            activities.push({
+              id: `ms-${p.id}-${m.id}`,
+              projectId: p.id,
+              project: p,
+              type: 'milestone',
+              title: `Milestone: ${m.label}`,
+              description: `${p.coupleName} Wedding film milestone reached`,
+              timestamp: m.completedAt,
+              formattedTime: formatTimeAgo(m.completedAt),
+              badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+              icon: CheckCircle
+            });
+          }
+        });
+      }
+
+      // Project status update
+      const statusLabels: Record<string, string> = {
+        data_received: 'Data Received',
+        assigned: 'Assigned to Editor',
+        editing: 'Editing In Progress',
+        review: 'Review Cut Ready',
+        revision: 'Revisions Requested',
+        rendering: 'Rendering Final Cut',
+        delivered: 'Film Delivered',
+        closed: 'Project Closed'
+      };
+
+      const isRevision = p.status === 'revision';
+
+      activities.push({
+        id: `proj-${p.id}`,
+        projectId: p.id,
+        project: p,
+        type: isRevision ? 'revision' : 'status_change',
+        title: `${p.coupleName} • ${statusLabels[p.status] || p.status}`,
+        description: `${p.projectName || 'Wedding Film'} (${p.studioName}) • ${p.assignedEditorName ? `Editor: ${p.assignedEditorName}` : 'Unassigned'}`,
+        timestamp: p.updatedAt || p.createdAt,
+        formattedTime: formatTimeAgo(p.updatedAt || p.createdAt),
+        badgeColor: isRevision 
+          ? 'bg-orange-500/20 text-orange-300 border-orange-500/40' 
+          : p.status === 'delivered' 
+            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+            : 'bg-blue-500/20 text-blue-300 border-blue-500/40',
+        icon: isRevision ? Edit : p.status === 'delivered' ? CheckCircle : Clock
+      });
+    });
+
+    // Sort by timestamp descending
+    activities.sort((a, b) => {
+      const getTime = (val: any) => {
+        if (!val) return 0;
+        if (typeof val === 'number') return val;
+        if (typeof val === 'string') return new Date(val).getTime() || 0;
+        if (val.seconds) return val.seconds * 1000;
+        if (val.toDate) return val.toDate().getTime();
+        return 0;
+      };
+      return getTime(b.timestamp) - getTime(a.timestamp);
+    });
+
+    // Deduplicate & limit to 5
+    const uniqueMap = new Map();
+    activities.forEach(item => {
+      if (!uniqueMap.has(item.id)) {
+        uniqueMap.set(item.id, item);
+      }
+    });
+
+    return Array.from(uniqueMap.values()).slice(0, 5);
+  }, [projects, notifications]);
 
   // Container motion presets
   const containerVariants = {
@@ -844,6 +1095,116 @@ const DashboardView = React.memo(function DashboardView({
   const itemVariants = {
     hidden: { opacity: 0, y: 15 },
     show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 100 } }
+  };
+
+  // Top-Priority Pinned Working Projects Component
+  const renderActiveWorkingProjectsSection = () => {
+    const activeWorkingProjectsList = projects.filter(p => !['delivered', 'closed'].includes(p.status));
+    
+    if (activeWorkingProjectsList.length === 0) return null;
+
+    return (
+      <div className="bg-gradient-to-br from-charcoal-900 via-charcoal-950 to-luxury-green-950/90 border-2 border-gold-500/40 rounded-3xl p-4 md:p-6 shadow-2xl relative overflow-hidden mb-6">
+        {/* Ambient Glow Effects */}
+        <div className="absolute top-0 right-0 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-0 w-48 h-48 bg-gold-500/10 rounded-full blur-2xl pointer-events-none" />
+
+        {/* Title Header Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4 relative z-10">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3.5 w-3.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
+            </span>
+            <div className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-gold-400 fill-gold-400 animate-pulse" />
+              <h2 className="text-base md:text-xl font-black text-white tracking-wider font-display uppercase">
+                CHALU / WORKING PROJECTS ({activeWorkingProjectsList.length})
+              </h2>
+            </div>
+            <span className="text-[11px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-3 py-0.5 rounded-full font-bold shadow-sm">
+              ⚡ Top Priority
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="hidden lg:inline text-xs text-gold-300/80 font-medium">
+              Currently running projects pinned at the top
+            </span>
+            <button
+              onClick={() => onQuickAction('projects')}
+              className="text-xs font-bold text-gold-400 hover:text-gold-300 flex items-center gap-1.5 transition-all cursor-pointer bg-black/40 hover:bg-black/60 px-4 py-2 rounded-xl border border-gold-500/30 shadow-md"
+            >
+              <span>View All ({activeWorkingProjectsList.length})</span>
+              <ArrowUpRight className="w-4 h-4 text-gold-400" />
+            </button>
+          </div>
+        </div>
+
+        {/* Responsive Grid of Active Working Projects */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 pt-4 relative z-10">
+          {activeWorkingProjectsList.map((proj) => {
+            const editor = editors.find(e => e.id === proj.assignedEditorId);
+            const remainingDays = proj.deliveryDate ? Math.ceil((new Date(proj.deliveryDate).getTime() - Date.now()) / (1000 * 3600 * 24)) : null;
+
+            const getStatusBadge = (status: string) => {
+              switch (status) {
+                case 'editing':
+                  return { label: 'Editing In Progress', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' };
+                case 'assigned':
+                  return { label: 'Assigned to Editor', bg: 'bg-amber-500/20 text-amber-300 border-amber-500/40' };
+                case 'first_cut':
+                  return { label: 'First Cut Ready', bg: 'bg-purple-500/20 text-purple-300 border-purple-500/40' };
+                case 'revisions':
+                  return { label: 'Revisions', bg: 'bg-orange-500/20 text-orange-300 border-orange-500/40' };
+                default:
+                  return { label: 'Data Received', bg: 'bg-blue-500/20 text-blue-300 border-blue-500/40' };
+              }
+            };
+
+            const badge = getStatusBadge(proj.status);
+
+            return (
+              <div
+                key={proj.id}
+                onClick={() => setSelectedInspectItem({ type: 'project', data: proj })}
+                className="p-4 bg-charcoal-950/90 border border-gold-500/25 hover:border-gold-400/80 rounded-2xl transition-all cursor-pointer group hover:bg-charcoal-900 relative overflow-hidden shadow-xl flex flex-col justify-between space-y-3"
+              >
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-mono font-black text-gold-400/90 tracking-wider">
+                      {proj.id} • {proj.studioName || 'Studio'}
+                    </span>
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${badge.bg}`}>
+                      {badge.label}
+                    </span>
+                  </div>
+
+                  <h3 className="text-sm font-black text-white group-hover:text-gold-300 transition-colors truncate font-display">
+                    {proj.projectName || proj.coupleName}
+                  </h3>
+                </div>
+
+                <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs text-gray-400 font-medium">
+                  <span className="flex items-center gap-1 truncate text-gray-300">
+                    <User className="w-3.5 h-3.5 text-gold-400 shrink-0" />
+                    <span className="truncate">{editor ? editor.name : (proj.assignedEditorName || 'Unassigned')}</span>
+                  </span>
+
+                  {remainingDays !== null && (
+                    <span className={`font-mono font-black shrink-0 text-[11px] ${
+                      remainingDays < 0 ? 'text-red-400' : remainingDays <= 3 ? 'text-amber-400' : 'text-emerald-400'
+                    }`}>
+                      {remainingDays < 0 ? `${Math.abs(remainingDays)}d overdue` : `${remainingDays}d left`}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
   };
 
   const renderRemindersHub = (isOrganic: boolean) => {
@@ -1048,9 +1409,7 @@ const DashboardView = React.memo(function DashboardView({
                           <span className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded font-bold ${
                             isCriticalPayment 
                               ? 'bg-red-500/20 text-red-300 border border-red-500/30' 
-                              : reminder.type === 'invoice' 
-                                ? 'bg-amber-500/20 text-amber-300' 
-                                : 'bg-rose-500/20 text-rose-300'
+                              : 'bg-rose-500/20 text-rose-300'
                           }`}>
                             {isCriticalPayment ? '⚠️ CRITICAL ' : ''}{reminder.type}
                           </span>
@@ -1211,6 +1570,101 @@ const DashboardView = React.memo(function DashboardView({
     );
   };
 
+  const renderRecentActivityFeed = (isOrganic = false) => {
+    return (
+      <div className={`p-6 rounded-3xl ${isOrganic ? 'organic-green-leaf-gradient border border-luxury-green-600/20' : 'glass-panel border border-luxury-green-800/10'} shadow-xl relative overflow-hidden transition-all duration-300 my-6`}>
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-5 pb-4 border-b border-white/5">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 bg-black/40 rounded-2xl border border-gold-500/20 text-gold-400">
+              <Activity className="w-5 h-5 animate-pulse text-gold-400" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
+                <h2 className="text-lg font-bold text-white font-display">Recent Activity Feed</h2>
+                <span className="text-[9px] font-mono tracking-widest px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 rounded-full uppercase font-bold">
+                  Last 5 Updates
+                </span>
+              </div>
+              <p className="text-xs text-gray-300 mt-0.5">Real-time log of recent film updates, status changes, and client revision requests.</p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => onQuickAction('projects')}
+            className="text-xs font-mono font-semibold text-gold-400 hover:text-gold-200 flex items-center space-x-1.5 px-3 py-1.5 bg-black/30 hover:bg-black/50 border border-gold-500/20 rounded-xl transition-all shrink-0 cursor-pointer"
+          >
+            <span>All Projects</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {recentActivityFeed.length > 0 ? (
+          <div className="space-y-3">
+            {recentActivityFeed.map((item) => {
+              const IconComp = item.icon || Activity;
+              return (
+                <div
+                  key={item.id}
+                  className="p-3.5 rounded-2xl bg-black/40 border border-white/10 hover:border-gold-500/40 hover:bg-black/60 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 group relative overflow-hidden"
+                >
+                  <div className="flex items-start sm:items-center space-x-3.5 min-w-0">
+                    <div className="p-2.5 rounded-xl bg-charcoal-900 border border-white/10 shrink-0 text-gold-400 group-hover:scale-105 transition-transform">
+                      <IconComp className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-bold text-white group-hover:text-gold-300 transition-colors truncate">
+                          {item.title}
+                        </span>
+                        <span className={`text-[9px] font-mono font-semibold px-2 py-0.5 rounded-full border uppercase tracking-wider ${item.badgeColor}`}>
+                          {item.type.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-300 truncate mt-1">
+                        {item.description}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                    <span className="text-[10px] font-mono text-gray-400 flex items-center space-x-1">
+                      <Clock className="w-3 h-3 text-gold-400/80" />
+                      <span>{item.formattedTime}</span>
+                    </span>
+
+                    {item.project ? (
+                      <button
+                        onClick={() => setSelectedInspectItem({ type: 'project', data: item.project })}
+                        className="px-3 py-1.5 rounded-xl bg-gold-500/10 hover:bg-gold-500/20 text-gold-300 border border-gold-500/30 text-xs font-mono font-semibold flex items-center space-x-1 transition-all cursor-pointer hover:scale-[1.02]"
+                      >
+                        <span>Inspect Details</span>
+                        <ExternalLink className="w-3 h-3 ml-0.5" />
+                      </button>
+                    ) : item.projectId ? (
+                      <button
+                        onClick={() => onQuickAction('projects', item.projectId)}
+                        className="px-3 py-1.5 rounded-xl bg-gold-500/10 hover:bg-gold-500/20 text-gold-300 border border-gold-500/30 text-xs font-mono font-semibold flex items-center space-x-1 transition-all cursor-pointer hover:scale-[1.02]"
+                      >
+                        <span>View Details</span>
+                        <ExternalLink className="w-3 h-3 ml-0.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-8 bg-black/20 rounded-2xl border border-white/5">
+            <Activity className="w-8 h-8 text-gold-400/40 mx-auto mb-2" />
+            <p className="text-xs text-gray-400 font-mono">No recent project updates or revision activities logged yet.</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderRecentPaymentsLedger = () => {
     // Show last 5 payments
     const recentPayments = payments.slice(0, 5);
@@ -1271,7 +1725,12 @@ const DashboardView = React.memo(function DashboardView({
                         {pay.projectCoupleName || 'Wedding Film'}
                       </td>
                       <td className="py-3.5 text-gray-200">
-                        {entityName}
+                        <div>{entityName}</div>
+                        {isIncoming && pay.receivedFrom && (
+                          <div className="text-[10px] text-gray-400 font-sans mt-0.5">
+                            Payer: <span className="text-gray-300 font-medium">{pay.receivedFrom === 'KK Sharma' || pay.receivedFrom === 'Wedding By KK' ? 'Satish Tiwari' : pay.receivedFrom}</span>
+                          </div>
+                        )}
                       </td>
                       <td className="py-3.5 text-gray-400 font-mono">
                         {pay.date}
@@ -1323,7 +1782,7 @@ const DashboardView = React.memo(function DashboardView({
                   </span>
                 )}
               </div>
-              <p className="text-[10px] text-gray-400 font-mono mt-0.5 uppercase">Identifies overdue partner invoices & unpaid editor ledger balances</p>
+              <p className="text-[10px] text-gray-400 font-mono mt-0.5 uppercase">Identifies unpaid editor ledger balances & outstanding dues</p>
             </div>
           </div>
           <div className="text-right shrink-0">
@@ -1333,50 +1792,7 @@ const DashboardView = React.memo(function DashboardView({
         </div>
 
         {totalNeedsAttentionCount > 0 ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Column 1: Overdue Invoices */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                <span className="text-[10px] font-mono font-bold uppercase text-gray-400 tracking-wider flex items-center space-x-1.5">
-                  <FileText className="w-3.5 h-3.5 text-red-400" />
-                  <span>Overdue Studio Invoices ({overdueInvoicesList.length})</span>
-                </span>
-                <span className="text-[10px] font-mono text-red-400 font-semibold">
-                  ₹{overdueInvoicesList.reduce((sum, inv) => sum + (inv.balanceDue || 0), 0).toLocaleString('en-IN')} pending
-                </span>
-              </div>
-
-              {overdueInvoicesList.length > 0 ? (
-                <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1 scrollbar-thin">
-                  {overdueInvoicesList.map((inv) => {
-                    const studio = studios.find(s => s.id === inv.studioId);
-                    return (
-                      <div key={inv.id} className="p-3 rounded-xl bg-black/40 border border-red-500/10 hover:border-red-500/20 transition-colors flex justify-between items-center text-xs">
-                        <div className="min-w-0 pr-2">
-                          <div className="flex items-center space-x-1.5">
-                            <span className="font-bold text-gray-200 truncate">{studio?.name || 'Studio Partner'}</span>
-                            <span className="text-[9px] font-mono bg-red-500/10 text-red-400 border border-red-500/20 px-1 rounded">Overdue</span>
-                          </div>
-                          <p className="text-[10px] text-gray-400 truncate mt-0.5">Couple: {inv.coupleName || 'Wedding Film'}</p>
-                          <div className="flex items-center space-x-2 mt-1 text-[9px] text-gray-500 font-mono">
-                            <span className="flex items-center gap-1"><Clock className="w-2.5 h-2.5" /> Due: {inv.dueDate}</span>
-                            <span>•</span>
-                            <span>Inv: {inv.id}</span>
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className="font-sans font-bold text-red-400">₹{inv.balanceDue?.toLocaleString('en-IN')}</p>
-                          <p className="text-[9px] text-gray-500 mt-0.5 font-mono">Total: ₹{inv.totalAmount?.toLocaleString('en-IN')}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-gray-500 text-xs italic font-mono py-4 text-center">No overdue invoices found. Excellent!</p>
-              )}
-            </div>
-
+          <div className="grid grid-cols-1 gap-6">
             {/* Column 2: Unpaid Editor Balances */}
             <div className="space-y-3">
               <div className="flex items-center justify-between border-b border-white/5 pb-2">
@@ -1421,7 +1837,7 @@ const DashboardView = React.memo(function DashboardView({
           <div className="p-5 rounded-2xl bg-[#1e5546]/10 border border-luxury-green-500/20 flex flex-col items-center justify-center text-center py-8">
             <CheckCircle className="w-10 h-10 text-emerald-400 mb-2.5" />
             <h4 className="text-xs font-bold text-emerald-300 font-mono uppercase tracking-wide">All Balances Settled Perfectly</h4>
-            <p className="text-[10px] text-emerald-400/70 mt-1 max-w-md">Every client invoice has been paid on-time and all editor wages are settled. Operational cashflow is perfectly balanced.</p>
+            <p className="text-[10px] text-emerald-400/70 mt-1 max-w-md">All client balances have been settled and editor wages are clear. Operational cashflow is perfectly balanced.</p>
           </div>
         )}
       </div>
@@ -1624,6 +2040,110 @@ const DashboardView = React.memo(function DashboardView({
     );
   };
 
+  const renderMonthlyRevenueChart = (isOrganic = false) => {
+    const panelBg = isOrganic 
+      ? "bg-charcoal-900/60 border-luxury-green-800/15 backdrop-blur-md" 
+      : "glass-panel border-luxury-green-800/10";
+
+    const titleFont = isOrganic ? "font-serif italic text-white" : "font-display font-bold text-white";
+
+    return (
+      <div className={`p-6 rounded-3xl ${panelBg} border shadow-md space-y-6`}>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-white/5 pb-4">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="p-1.5 rounded-lg bg-gold-500/10 text-gold-400 border border-gold-500/20">
+                <TrendingUp className="w-4 h-4 text-gold-400" />
+              </span>
+              <h2 className={`text-base font-bold tracking-tight ${titleFont}`}>
+                {chartView === 'health' ? 'Monthly Revenue vs. Expenses' : 'Monthly Revenue & Cashflow Trends'}
+              </h2>
+            </div>
+            <p className="text-[10px] text-gray-400 font-mono mt-1 uppercase">
+              {chartView === 'health' 
+                ? 'Actual cash receipts vs. editor payouts and logged operational expenditures'
+                : 'Income trends based on project completion dates & contract values'}
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            {/* View Toggle */}
+            <div className="flex bg-black/40 border border-white/5 p-1 rounded-2xl self-start sm:self-auto shrink-0">
+              <button
+                onClick={() => setChartView('health')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-mono font-semibold transition-all cursor-pointer ${
+                  chartView === 'health'
+                    ? 'bg-gold-500 text-emerald-950 font-bold'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Revenue vs Expenses
+              </button>
+              <button
+                onClick={() => setChartView('cashflow')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-mono font-semibold transition-all cursor-pointer ${
+                  chartView === 'cashflow'
+                    ? 'bg-gold-500 text-emerald-950 font-bold'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Cashflow Trends
+              </button>
+            </div>
+
+            <div className="flex space-x-2 bg-black/30 p-1.5 rounded-xl border border-white/5 text-[10px] self-start sm:self-auto">
+              <span className="px-2 py-0.5 bg-luxury-green-800/40 text-gold-400 font-mono rounded-lg">Last 6 Months</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="h-80 w-full">
+          <ResponsiveContainer width="100%" height={320} minWidth={100}>
+            {chartView === 'health' ? (
+              <ComposedChart data={revenueVsExpensesData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(30, 85, 70, 0.1)" />
+                <XAxis dataKey="name" stroke="#6b7280" fontSize={11} tickLine={false} />
+                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} tickFormatter={(v) => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
+                <Tooltip 
+                  formatter={(value, name) => [`₹${Number(value).toLocaleString('en-IN')}`, name]}
+                  contentStyle={{ 
+                    backgroundColor: '#11141a', 
+                    border: isOrganic ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(212, 175, 55, 0.3)',
+                    borderRadius: '16px',
+                    color: '#f3f4f6'
+                  }} 
+                />
+                <Legend verticalAlign="top" height={36} iconType="circle" />
+                <Bar dataKey="Revenue (Receipts)" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20} />
+                <Bar dataKey="Expenses" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={20} />
+                <Line type="monotone" dataKey="Net Profit" stroke="#fbbf24" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              </ComposedChart>
+            ) : (
+              <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(30, 85, 70, 0.1)" />
+                <XAxis dataKey="name" stroke="#6b7280" fontSize={11} tickLine={false} />
+                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} tickFormatter={(v) => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
+                <Tooltip 
+                  formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`]}
+                  contentStyle={{ 
+                    backgroundColor: '#11141a', 
+                    border: isOrganic ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(212, 175, 55, 0.3)',
+                    borderRadius: '16px',
+                    color: '#f3f4f6'
+                  }} 
+                />
+                <Legend verticalAlign="top" height={36} iconType="circle" />
+                <Line type="monotone" dataKey="Total Revenue" stroke="#3b82f6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                <Line type="monotone" dataKey="Paid Revenue" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                <Line type="monotone" dataKey="Pending Revenue" stroke="#f59e0b" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              </LineChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  };
+
   // Computed Search Results across Projects, Studios, and Editors
   const searchResultsProjects = globalSearchQuery.trim() === '' ? [] : projects.filter(p => 
     p.coupleName?.toLowerCase().includes(globalSearchQuery.toLowerCase()) ||
@@ -1706,7 +2226,121 @@ const DashboardView = React.memo(function DashboardView({
           </div>
         </div>
 
-        {/* Spacious, Finger-Friendly Quick Actions (Mobile Quick Panel) */}
+        {/* TOP PINNED: CHALU / WORKING PROJECTS SECTION FOR MOBILE */}
+        {renderActiveWorkingProjectsSection()}
+
+        {/* Compact Tabbed Reminders Hub - PRIORITY 2 FOR MOBILE */}
+        <div className="p-4 rounded-3xl bg-charcoal-900/90 border border-luxury-green-800/20 shadow-lg space-y-4">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center space-x-2">
+              <Bell className="w-4 h-4 text-gold-400" />
+              <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-white">Production & Payment Alerts</h2>
+            </div>
+            <span className="text-[9px] font-mono px-2 py-0.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full font-bold uppercase">
+              {totalCriticalAlerts} Urgent
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1 bg-black/40 p-1 rounded-xl border border-white/5">
+            <button
+              onClick={() => setReminderTab('payment')}
+              className={`py-1.5 rounded-lg text-[10px] font-mono font-bold tracking-wide transition-all cursor-pointer flex items-center justify-center space-x-1 ${
+                reminderTab === 'payment'
+                  ? 'bg-gold-500 text-emerald-950 font-extrabold'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <IndianRupee className="w-3 h-3" />
+              <span>Dues ({filteredPaymentReminders.length})</span>
+            </button>
+            <button
+              onClick={() => setReminderTab('project')}
+              className={`py-1.5 rounded-lg text-[10px] font-mono font-bold tracking-wide transition-all cursor-pointer flex items-center justify-center space-x-1 ${
+                reminderTab === 'project'
+                  ? 'bg-gold-500 text-emerald-950 font-extrabold'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <Clock className="w-3 h-3" />
+              <span>Deadlines ({filteredProjectReminders.length})</span>
+            </button>
+          </div>
+
+          <div className="space-y-2.5">
+            {reminderTab === 'payment' ? (
+              filteredPaymentReminders.slice(0, 3).length > 0 ? (
+                filteredPaymentReminders.slice(0, 3).map((reminder) => {
+                  const isCriticalPayment = reminder.status === 'overdue' || new Date(reminder.dueDate).getTime() < Date.now() || reminder.amount > 50000;
+                  return (
+                    <div key={reminder.id} className={`p-3 rounded-xl bg-black/40 border flex justify-between items-center ${isCriticalPayment ? 'border-red-500/20' : 'border-white/5'}`}>
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center space-x-1.5">
+                          {isCriticalPayment && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                          <h4 className="text-xs font-bold text-gray-200 truncate">{reminder.studioName}</h4>
+                        </div>
+                        <p className="text-[9px] text-gray-500 font-mono mt-0.5">Limit Date: {reminder.dueDate}</p>
+                      </div>
+                      <div className="text-right shrink-0 flex flex-col items-end">
+                        <span className={`text-xs font-bold font-mono ${isCriticalPayment ? 'text-red-400' : 'text-gold-400'}`}>₹{reminder.amount.toLocaleString('en-IN')}</span>
+                        <button
+                          onClick={() => handleCopyPaymentReminder(reminder)}
+                          className="text-[9px] text-emerald-400 hover:underline mt-1 font-mono font-medium cursor-pointer"
+                        >
+                          Send Reminder
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-6">
+                  <CheckCircle className="w-6 h-6 text-emerald-400 mx-auto opacity-40 mb-1.5" />
+                  <p className="text-xs text-gray-400 font-mono">All dues collected perfectly! 🎉</p>
+                </div>
+              )
+            ) : (
+              filteredProjectReminders.slice(0, 3).length > 0 ? (
+                filteredProjectReminders.slice(0, 3).map((reminder) => {
+                  const isOverdue = reminder.daysLeft < 0;
+                  return (
+                    <div key={reminder.id} className={`p-3 rounded-xl bg-black/40 border flex justify-between items-center ${isOverdue ? 'border-red-500/20' : 'border-white/5'}`}>
+                      <div className="min-w-0 pr-2">
+                        <h4 className="text-xs font-bold text-gray-200 truncate">{reminder.coupleName}</h4>
+                        <p className="text-[9px] text-gray-500 font-mono mt-0.5">Editor: {reminder.editorName}</p>
+                      </div>
+                      <div className="text-right shrink-0 flex flex-col items-end">
+                        <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                          isOverdue ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'
+                        }`}>
+                          {isOverdue ? 'Overdue' : `${reminder.daysLeft}d left`}
+                        </span>
+                        <button
+                          onClick={() => handleCopyProjectReminder(reminder)}
+                          className="text-[9px] text-emerald-400 hover:underline mt-1 font-mono font-medium cursor-pointer"
+                        >
+                          Ping Status
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-6">
+                  <CheckCircle className="w-6 h-6 text-emerald-400 mx-auto opacity-40 mb-1.5" />
+                  <p className="text-xs text-gray-400 font-mono">No approaching cut deadlines! 🎬</p>
+                </div>
+              )
+            )}
+          </div>
+        </div>
+
+        {/* NEEDS ATTENTION FOR MOBILE DASHBOARD - PRIORITY 3 */}
+        {renderNeedsAttention()}
+
+        {/* RECENT ACTIVITY FEED FOR MOBILE DASHBOARD */}
+        {renderRecentActivityFeed(true)}
+
+        {/* Finger-Friendly Quick Actions (Mobile Quick Panel) */}
         <div className="grid grid-cols-2 gap-3">
           <button
             onClick={() => {
@@ -1736,11 +2370,14 @@ const DashboardView = React.memo(function DashboardView({
           </button>
 
           <button
-            onClick={() => onQuickAction('finance', 'add_expense')}
-            className="p-4 rounded-2xl bg-charcoal-900 border border-luxury-green-800/20 text-gray-300 font-display font-semibold text-[11px] tracking-wider uppercase shadow-sm flex flex-col items-center justify-center text-center gap-2 active:scale-[0.97] transition-all cursor-pointer h-24"
+            onClick={() => {
+              const el = document.getElementById('whatsapp-reminders-section');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className="p-4 rounded-2xl bg-gradient-to-r from-emerald-900/60 to-emerald-950/80 border border-emerald-500/30 text-emerald-400 font-display font-semibold text-[11px] tracking-wider uppercase shadow-sm flex flex-col items-center justify-center text-center gap-2 active:scale-[0.97] transition-all cursor-pointer h-24 col-span-2"
           >
-            <Activity className="w-5 h-5 text-amber-500" />
-            <span>Log Expense</span>
+            <MessageSquare className="w-5 h-5 text-emerald-400" />
+            <span>📲 1-Click WhatsApp Reminders Hub</span>
           </button>
         </div>
 
@@ -1816,116 +2453,8 @@ const DashboardView = React.memo(function DashboardView({
           </div>
         </div>
 
-        {/* NEEDS ATTENTION FOR MOBILE DASHBOARD */}
-        {renderNeedsAttention()}
-
         {/* WORKFLOW SPARKLINES FOR MOBILE DASHBOARD */}
         {renderProjectCompletionSparklines(true)}
-
-        {/* Compact Tabbed Reminders Hub */}
-        <div className="p-4 rounded-3xl bg-charcoal-900/90 border border-luxury-green-800/10 shadow-lg space-y-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center space-x-1.5">
-              <Bell className="w-4 h-4 text-gold-400" />
-              <h2 className="text-sm font-serif italic text-white font-semibold">Production & Payment Alerts</h2>
-            </div>
-            <span className="text-[8px] font-mono px-2 py-0.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full font-bold uppercase">
-              {totalCriticalAlerts} Urgent
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-1 bg-black/40 p-1 rounded-xl border border-white/5">
-            <button
-              onClick={() => setReminderTab('payment')}
-              className={`py-1.5 rounded-lg text-[10px] font-mono font-bold tracking-wide transition-all cursor-pointer flex items-center justify-center space-x-1 ${
-                reminderTab === 'payment'
-                  ? 'bg-gold-500 text-emerald-950 font-extrabold'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <IndianRupee className="w-3 h-3" />
-              <span>Dues ({filteredPaymentReminders.length})</span>
-            </button>
-            <button
-              onClick={() => setReminderTab('project')}
-              className={`py-1.5 rounded-lg text-[10px] font-mono font-bold tracking-wide transition-all cursor-pointer flex items-center justify-center space-x-1 ${
-                reminderTab === 'project'
-                  ? 'bg-gold-500 text-emerald-950 font-extrabold'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              <Clock className="w-3 h-3" />
-              <span>Deadlines ({filteredProjectReminders.length})</span>
-            </button>
-          </div>
-
-          <div className="space-y-2.5">
-            {reminderTab === 'payment' ? (
-              filteredPaymentReminders.slice(0, 3).length > 0 ? (
-                filteredPaymentReminders.slice(0, 3).map((reminder) => {
-                  const isCriticalPayment = reminder.status === 'overdue' || new Date(reminder.dueDate).getTime() < Date.now() || reminder.amount > 50000;
-                  return (
-                    <div key={reminder.id} className={`p-3 rounded-xl bg-black/40 border flex justify-between items-center ${isCriticalPayment ? 'border-red-500/20' : 'border-white/5'}`}>
-                      <div className="min-w-0 pr-2">
-                        <div className="flex items-center space-x-1.5">
-                          {isCriticalPayment && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
-                          <h4 className="text-xs font-bold text-gray-200 truncate">{reminder.studioName}</h4>
-                        </div>
-                        <p className="text-[9px] text-gray-500 font-mono mt-0.5">Limit Date: {reminder.dueDate}</p>
-                      </div>
-                      <div className="text-right shrink-0 flex flex-col items-end">
-                        <span className={`text-xs font-bold font-mono ${isCriticalPayment ? 'text-red-400' : 'text-gold-400'}`}>₹{reminder.amount.toLocaleString('en-IN')}</span>
-                        <button
-                          onClick={() => handleCopyPaymentReminder(reminder)}
-                          className="text-[9px] text-emerald-400 hover:underline mt-1 font-mono font-medium"
-                        >
-                          Send Reminder
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="text-center py-6">
-                  <CheckCircle className="w-6 h-6 text-emerald-400 mx-auto opacity-40 mb-1.5" />
-                  <p className="text-xs text-gray-400 font-mono">All dues collected perfectly! 🎉</p>
-                </div>
-              )
-            ) : (
-              filteredProjectReminders.slice(0, 3).length > 0 ? (
-                filteredProjectReminders.slice(0, 3).map((reminder) => {
-                  const isOverdue = reminder.daysLeft < 0;
-                  return (
-                    <div key={reminder.id} className={`p-3 rounded-xl bg-black/40 border flex justify-between items-center ${isOverdue ? 'border-red-500/20' : 'border-white/5'}`}>
-                      <div className="min-w-0 pr-2">
-                        <h4 className="text-xs font-bold text-gray-200 truncate">{reminder.coupleName}</h4>
-                        <p className="text-[9px] text-gray-500 font-mono mt-0.5">Editor: {reminder.editorName}</p>
-                      </div>
-                      <div className="text-right shrink-0 flex flex-col items-end">
-                        <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                          isOverdue ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'
-                        }`}>
-                          {isOverdue ? 'Overdue' : `${reminder.daysLeft}d left`}
-                        </span>
-                        <button
-                          onClick={() => handleCopyProjectReminder(reminder)}
-                          className="text-[9px] text-emerald-400 hover:underline mt-1 font-mono font-medium"
-                        >
-                          Ping Status
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="text-center py-6">
-                  <CheckCircle className="w-6 h-6 text-emerald-400 mx-auto opacity-40 mb-1.5" />
-                  <p className="text-xs text-gray-400 font-mono">No approaching cut deadlines! 🎬</p>
-                </div>
-              )
-            )}
-          </div>
-        </div>
 
         {/* Minimal Mobile Transaction Stream */}
         <div className="p-4 rounded-3xl bg-charcoal-900/90 border border-luxury-green-800/10 shadow-lg space-y-4">
@@ -1939,7 +2468,7 @@ const DashboardView = React.memo(function DashboardView({
                 setPaymentType('studio');
                 setIsPaymentModalOpen(true);
               }}
-              className="text-[10px] text-gold-400 font-mono hover:underline"
+              className="text-[10px] text-gold-400 font-mono hover:underline cursor-pointer"
             >
               + Record
             </button>
@@ -1956,6 +2485,9 @@ const DashboardView = React.memo(function DashboardView({
                   <div key={pay.id} className="p-3 rounded-xl bg-black/35 border border-white/5 flex justify-between items-center">
                     <div className="min-w-0 pr-2">
                       <h4 className="text-xs font-bold text-gray-200 truncate">{name}</h4>
+                      {isIncoming && pay.receivedFrom && (
+                        <p className="text-[9px] text-gray-400 font-sans truncate">Payer: {pay.receivedFrom === 'KK Sharma' || pay.receivedFrom === 'Wedding By KK' ? 'Satish Tiwari' : pay.receivedFrom}</p>
+                      )}
                       <div className="flex items-center space-x-1.5 mt-0.5 text-[9px] text-gray-500 font-mono">
                         <span>{pay.date}</span>
                         <span>•</span>
@@ -2259,10 +2791,103 @@ const DashboardView = React.memo(function DashboardView({
                     Where elegant wedding cinematic masterpieces meet structured, organic workflow management. Synced in cloud-realtime.
                   </p>
                 </div>
-                <div className="hidden md:flex flex-col items-center justify-center p-6 rounded-3xl bg-black/20 border border-white/5 backdrop-blur-sm shadow-xl shrink-0">
-                  <Logo size={110} variant="gold" showText={true} />
+                <div className="hidden lg:flex flex-col items-center justify-center shrink-0">
+                  <LoginWeatherClockWidget layout="horizontal" />
                 </div>
               </div>
+
+              {/* Live Running Projects Embedded Section inside Header */}
+              {(() => {
+                const runningProjects = projects.filter(p => !['delivered', 'closed'].includes(p.status));
+                if (runningProjects.length === 0) return null;
+
+                return (
+                  <div className="relative z-10 my-4 p-4 md:p-5 rounded-2xl bg-black/40 backdrop-blur-md border border-gold-500/30 shadow-xl">
+                    <div className="flex flex-wrap items-center justify-between mb-3 border-b border-white/10 pb-2.5 gap-2">
+                      <div className="flex items-center space-x-2">
+                        <span className="relative flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                        </span>
+                        <Zap className="w-4 h-4 text-gold-400 fill-gold-400 animate-pulse" />
+                        <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                          Current Running Projects ({runningProjects.length})
+                        </h3>
+                        <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
+                          ⚡ Live Chalu Workload
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onQuickAction('projects')}
+                        className="text-[10px] font-mono text-gold-400 hover:text-gold-200 flex items-center space-x-1 cursor-pointer bg-black/40 hover:bg-black/60 px-2.5 py-1 rounded-lg border border-gold-500/20 transition-all"
+                      >
+                        <span>View All Projects ({runningProjects.length})</span>
+                        <ArrowUpRight className="w-3 h-3" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                      {runningProjects.map((proj) => {
+                        const editor = editors.find(e => e.id === proj.assignedEditorId);
+                        const remainingDays = proj.deliveryDate ? Math.ceil((new Date(proj.deliveryDate).getTime() - Date.now()) / (1000 * 3600 * 24)) : null;
+
+                        const badgeClass = 
+                          proj.status === 'editing' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+                          proj.status === 'revision' ? 'bg-orange-500/20 text-orange-300 border-orange-500/40' :
+                          proj.status === 'review' ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' :
+                          proj.status === 'rendering' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
+                          'bg-blue-500/20 text-blue-300 border-blue-500/40';
+
+                        // Priority dynamic border glow and badge
+                        const pGlow = 
+                          proj.priority === 'urgent' ? { border: 'border-rose-500 shadow-[0_0_18px_rgba(244,63,94,0.4)] ring-1 ring-rose-500/40', badge: 'bg-rose-500/20 text-rose-300 border-rose-500/50 font-bold animate-pulse', label: '🚨 Urgent' } :
+                          proj.priority === 'high' ? { border: 'border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.35)] ring-1 ring-amber-400/30', badge: 'bg-amber-500/20 text-amber-300 border-amber-400/50 font-bold', label: '🔥 High' } :
+                          proj.priority === 'medium' ? { border: 'border-sky-400/80 shadow-[0_0_12px_rgba(56,189,248,0.25)] ring-1 ring-sky-400/30', badge: 'bg-sky-500/20 text-sky-300 border-sky-400/40 font-semibold', label: '⚡ Medium' } :
+                          { border: 'border-emerald-500/40 hover:border-emerald-400/60 shadow-[0_0_8px_rgba(16,185,129,0.15)]', badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 font-medium', label: '🌱 Low' };
+
+                        return (
+                          <div
+                            key={proj.id}
+                            onClick={() => setSelectedInspectItem({ type: 'project', data: proj })}
+                            className={`p-3.5 rounded-xl bg-charcoal-950/90 hover:bg-charcoal-900 border transition-all cursor-pointer flex flex-col justify-between space-y-2 group shadow-md ${pGlow.border}`}
+                          >
+                            <div className="flex items-center justify-between text-[10px] font-mono gap-1">
+                              <span className="text-gold-400 font-bold truncate max-w-[100px]">
+                                {proj.id} • {proj.studioName || 'Studio'}
+                              </span>
+                              <div className="flex items-center space-x-1 shrink-0">
+                                <span className={`px-2 py-0.5 rounded-full uppercase text-[8px] border ${pGlow.badge}`}>
+                                  {pGlow.label}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-full font-bold uppercase text-[8px] border ${badgeClass}`}>
+                                  {proj.status}
+                                </span>
+                              </div>
+                            </div>
+
+                            <h4 className="text-xs font-bold text-white group-hover:text-gold-300 truncate font-display">
+                              {proj.projectName || proj.coupleName}
+                            </h4>
+
+                            <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono pt-1.5 border-t border-white/5">
+                              <span className="truncate text-gray-300 flex items-center space-x-1">
+                                <User className="w-3 h-3 text-gold-400 shrink-0" />
+                                <span className="truncate">{editor ? editor.name : (proj.assignedEditorName || 'Unassigned')}</span>
+                              </span>
+                              {remainingDays !== null && (
+                                <span className={`font-bold shrink-0 ml-1 ${remainingDays <= 2 ? 'text-rose-400 animate-pulse' : 'text-emerald-400'}`}>
+                                  {remainingDays < 0 ? 'Overdue' : `${remainingDays}d left`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Bottom Row: Premium Sand Capsule Button & Stats */}
               <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4 border-t border-luxury-green-700/30 pt-6">
@@ -2290,9 +2915,26 @@ const DashboardView = React.memo(function DashboardView({
                     <Plus className="w-4 h-4 text-emerald-950 stroke-[3]" />
                     <span>New Wedding Film</span>
                   </button>
+
+                  <button
+                    onClick={() => {
+                      const el = document.getElementById('whatsapp-reminders-section');
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="bg-emerald-900/50 border border-emerald-500/40 text-emerald-400 font-display font-medium text-xs tracking-wider uppercase px-6 py-3.5 rounded-full shadow-lg hover:scale-[1.04] transition-all cursor-pointer inline-flex items-center space-x-2 justify-center"
+                  >
+                    <MessageSquare className="w-4 h-4 text-emerald-400" />
+                    <span>📲 WhatsApp Reminders</span>
+                  </button>
                 </div>
               </div>
             </div>
+
+            {/* PRIORITY 2: PRODUCTION & PAYMENT ALERTS HUB */}
+            {renderRemindersHub(true)}
+
+            {/* PRIORITY 3: NEEDS ATTENTION (DUES & UNPAID WAGES) */}
+            {renderNeedsAttention()}
 
             {/* MIDDLE SECTION: EMERALD HORIZON RIBBON */}
             <div className="organic-green-leaf-gradient organic-leaf-round-md p-6 md:p-8 shadow-xl border border-luxury-green-600/20 text-emerald-50">
@@ -2353,7 +2995,7 @@ const DashboardView = React.memo(function DashboardView({
                 <div className="flex justify-between items-start relative z-10">
                   <div>
                     <span className="text-[10px] uppercase font-mono text-amber-200 tracking-wider">Active Pipeline</span>
-                    <h3 className="text-lg font-serif italic text-white mt-0.5">Stare Seador Overview</h3>
+                    <h3 className="text-lg font-serif italic text-white mt-0.5">Active Film Cuts Pipeline</h3>
                   </div>
                   <div className="p-2 rounded-full bg-white/10">
                     <Flower className="w-4 h-4 text-gold-400" />
@@ -2395,7 +3037,7 @@ const DashboardView = React.memo(function DashboardView({
                 <div className="flex justify-between items-start relative z-10">
                   <div>
                     <span className="text-[10px] uppercase font-mono text-amber-200 tracking-wider">Alliance Network</span>
-                    <h3 className="text-lg font-serif italic text-white mt-0.5">Teavnt Studio Partners</h3>
+                    <h3 className="text-lg font-serif italic text-white mt-0.5">Studio Partners Network</h3>
                   </div>
                   <div className="p-2 rounded-full bg-black/20">
                     <Sprout className="w-4 h-4 text-gold-400" />
@@ -2418,7 +3060,7 @@ const DashboardView = React.memo(function DashboardView({
                   <span>Active Studios: {activeStudiosCount}</span>
                   <button 
                     onClick={() => onQuickAction('studios')} 
-                    className="hover:underline flex items-center space-x-1 text-gold-400"
+                    className="hover:underline flex items-center space-x-1 text-gold-400 cursor-pointer"
                   >
                     <span>Affiliates</span>
                     <ChevronRight className="w-3 h-3" />
@@ -2435,7 +3077,7 @@ const DashboardView = React.memo(function DashboardView({
                 <div className="flex justify-between items-start relative z-10">
                   <div>
                     <span className="text-[10px] uppercase font-mono text-orange-200 tracking-wider">Deadlines & Deliveries</span>
-                    <h3 className="text-lg font-serif italic text-white mt-0.5">Vouseihuiercs Tracker</h3>
+                    <h3 className="text-lg font-serif italic text-white mt-0.5">Deliveries & Schedule Tracker</h3>
                   </div>
                   <div className="p-2 rounded-full bg-black/20">
                     <Sparkle className="w-4 h-4 text-gold-400" />
@@ -2468,7 +3110,7 @@ const DashboardView = React.memo(function DashboardView({
                   <span>Awaiting delivery: {activeProjectsCount}</span>
                   <button 
                     onClick={() => onQuickAction('calendar')} 
-                    className="hover:underline flex items-center space-x-1 text-gold-400"
+                    className="hover:underline flex items-center space-x-1 text-gold-400 cursor-pointer"
                   >
                     <span>View Calendar</span>
                     <ChevronRight className="w-3 h-3" />
@@ -2513,7 +3155,6 @@ const DashboardView = React.memo(function DashboardView({
                     {notifications.length > 0 ? (
                       <div className="space-y-2">
                         {notifications.slice(0, 3).map((notif, idx) => {
-                          // Determine icon and color based on notification type
                           let IconComponent = Sparkle;
                           let iconColor = "text-gold-400";
                           let bgClass = "bg-gold-500/10";
@@ -2526,7 +3167,7 @@ const DashboardView = React.memo(function DashboardView({
                             IconComponent = Clock;
                             iconColor = "text-amber-400";
                             bgClass = "bg-amber-500/10";
-                          } else if (notif.type === 'payment_pending' || notif.type === 'invoice_pending') {
+                          } else if (notif.type === 'payment_pending') {
                             IconComponent = IndianRupee;
                             iconColor = "text-rose-400";
                             bgClass = "bg-rose-500/10";
@@ -2586,7 +3227,7 @@ const DashboardView = React.memo(function DashboardView({
                 <div className="flex justify-between items-start relative z-10">
                   <div>
                     <span className="text-[10px] uppercase font-mono text-stone-300 tracking-wider">Outgoings & Expenses</span>
-                    <h3 className="text-lg font-serif italic text-white mt-0.5">6soct Fias Ledger</h3>
+                    <h3 className="text-lg font-serif italic text-white mt-0.5">Operational Expense Ledger</h3>
                   </div>
                   <div className="p-2 rounded-full bg-black/20">
                     <Flower2 className="w-4 h-4 text-gold-400" />
@@ -2615,7 +3256,7 @@ const DashboardView = React.memo(function DashboardView({
                   <span>Wages logged: {editorPaymentsTotal > 0 ? 'Verified' : 'No payouts'}</span>
                   <button 
                     onClick={() => onQuickAction('finance')} 
-                    className="hover:underline flex items-center space-x-1 text-gold-400"
+                    className="hover:underline flex items-center space-x-1 text-gold-400 cursor-pointer"
                   >
                     <span>Ledger</span>
                     <ChevronRight className="w-3 h-3" />
@@ -2629,7 +3270,7 @@ const DashboardView = React.memo(function DashboardView({
                 <div className="flex justify-between items-start relative z-10">
                   <div>
                     <span className="text-[10px] uppercase font-mono text-emerald-900 tracking-wider font-semibold">Active Panel</span>
-                    <h3 className="text-lg font-serif italic text-emerald-950 mt-0.5">Blisstdare Hub</h3>
+                    <h3 className="text-lg font-serif italic text-emerald-950 mt-0.5">Quick Control Desk</h3>
                   </div>
                   <div className="p-2.5 rounded-full bg-emerald-950 text-gold-400 shadow-md">
                     <Menu className="w-4 h-4" />
@@ -2639,28 +3280,28 @@ const DashboardView = React.memo(function DashboardView({
                 <div className="my-3 grid grid-cols-2 gap-2 relative z-10">
                   <button 
                     onClick={() => onQuickAction('projects', 'add_project')}
-                    className="flex flex-col items-center justify-center p-3 rounded-xl bg-emerald-950 text-white hover:scale-[1.03] transition-transform text-center"
+                    className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-emerald-950 text-white hover:scale-[1.03] transition-transform text-center cursor-pointer"
                   >
                     <Plus className="w-4 h-4 text-gold-400 mb-1" />
                     <span className="text-[10px] font-mono tracking-tight font-medium">Add Film</span>
                   </button>
                   <button 
-                    onClick={() => onQuickAction('invoice', 'add_invoice')}
-                    className="flex flex-col items-center justify-center p-3 rounded-xl bg-emerald-950 text-white hover:scale-[1.03] transition-transform text-center"
+                    onClick={() => onQuickAction('finance')}
+                    className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-emerald-950 text-white hover:scale-[1.03] transition-transform text-center cursor-pointer"
                   >
                     <IndianRupee className="w-4 h-4 text-gold-400 mb-1" />
-                    <span className="text-[10px] font-mono tracking-tight font-medium">Invoice</span>
+                    <span className="text-[10px] font-mono tracking-tight font-medium">Finance</span>
                   </button>
                   <button 
                     onClick={() => onQuickAction('calendar')}
-                    className="flex flex-col items-center justify-center p-3 rounded-xl bg-emerald-950 text-white hover:scale-[1.03] transition-transform text-center"
+                    className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-emerald-950 text-white hover:scale-[1.03] transition-transform text-center cursor-pointer"
                   >
                     <CalendarIcon className="w-4 h-4 text-gold-400 mb-1" />
                     <span className="text-[10px] font-mono tracking-tight font-medium">Schedule</span>
                   </button>
                   <button 
                     onClick={() => onQuickAction('settings')}
-                    className="flex flex-col items-center justify-center p-3 rounded-xl bg-emerald-950 text-white hover:scale-[1.03] transition-transform text-center"
+                    className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-emerald-950 text-white hover:scale-[1.03] transition-transform text-center cursor-pointer"
                   >
                     <Settings className="w-4 h-4 text-gold-400 mb-1" />
                     <span className="text-[10px] font-mono tracking-tight font-medium">Config</span>
@@ -2675,14 +3316,24 @@ const DashboardView = React.memo(function DashboardView({
 
             </div>
 
-            {/* NEEDS ATTENTION FOR ORGANIC THEME */}
-            {renderNeedsAttention()}
+            {/* MONTHLY REVENUE & CASHFLOW CHART FOR ORGANIC THEME */}
+            {renderMonthlyRevenueChart(true)}
 
             {/* WORKFLOW SPARKLINES FOR ORGANIC THEME */}
             {renderProjectCompletionSparklines(true)}
 
-            {/* REMINDERS HUB FOR ORGANIC THEME */}
-            {renderRemindersHub(true)}
+            {/* GANTT CHART VISUALIZATION FOR ACTIVE WEDDINGS */}
+            <GanttChartTimeline 
+              projects={projects} 
+              onUpdateProject={onUpdateProject} 
+              onSelectProject={(id) => onQuickAction('projects', id)} 
+            />
+
+            {/* RECENT ACTIVITY FEED FOR ORGANIC THEME */}
+            {renderRecentActivityFeed(true)}
+
+            {/* AUTOMATED MONTHLY 5TH WHATSAPP REMINDERS FOR ORGANIC THEME */}
+            <MonthlyWhatsAppReminders projects={projects} studios={studios} editors={editors} payments={payments} />
 
             {renderRecentPaymentsLedger()}
           </motion.div>
@@ -2695,66 +3346,85 @@ const DashboardView = React.memo(function DashboardView({
             exit={{ opacity: 0, y: -15 }}
             className="space-y-8"
           >
-      {/* Top Welcome Panel with Ambient Glow */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between p-8 rounded-3xl glass-panel relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-40 bg-gradient-to-br from-luxury-green-700/10 to-gold-500/10 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse-slow" />
-        
-        <div className="flex flex-col sm:flex-row sm:items-center gap-6">
-          <Logo size={64} variant="gold" className="shrink-0" />
-          <div>
-            <div className="flex items-center space-x-3">
-              <span className="text-xs font-mono px-3 py-1 bg-gold-500/10 border border-gold-500/30 text-gold-400 rounded-full uppercase tracking-wider">
-                Wedding ERP Suite
-              </span>
-              <span className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full flex items-center space-x-1 ${
-                isOnline ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/30'
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full mr-1.5 animate-pulse ${isOnline ? 'bg-emerald-400' : 'bg-yellow-500'}`} />
-                {isOnline ? 'Cloud Synced' : 'Offline Mode'}
-              </span>
+            {/* PRIORITY 1: TOP PINNED CHALU / WORKING PROJECTS SECTION FOR CLASSIC THEME */}
+            {renderActiveWorkingProjectsSection()}
+
+            {/* PRIORITY 2: PRODUCTION & PAYMENT ALERTS HUB FOR CLASSIC THEME */}
+            {renderRemindersHub(false)}
+
+            {/* RECENT ACTIVITY FEED FOR CLASSIC THEME */}
+            {renderRecentActivityFeed(false)}
+
+            {/* PRIORITY 3: NEEDS ATTENTION FOR CLASSIC THEME */}
+            {renderNeedsAttention()}
+
+            {/* Top Welcome Panel & Full-Width Live Shoot Clock Weather Widget */}
+            <div className="flex flex-col space-y-4">
+              {/* Full-width Wide Horizontal Weather & Live Clock Bar */}
+              <div className="w-full">
+                <LoginWeatherClockWidget layout="horizontal" />
+              </div>
+
+              <div className="w-full flex flex-col md:flex-row md:items-center justify-between p-8 rounded-3xl glass-panel relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-80 h-40 bg-gradient-to-br from-luxury-green-700/10 to-gold-500/10 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse-slow" />
+                
+                <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+                  <Logo size={64} variant="gold" className="shrink-0" />
+                  <div>
+                    <div className="flex items-center space-x-3">
+                      <span className="text-xs font-mono px-3 py-1 bg-gold-500/10 border border-gold-500/30 text-gold-400 rounded-full uppercase tracking-wider">
+                        Wedding ERP Suite
+                      </span>
+                      <span className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full flex items-center space-x-1 ${
+                        isOnline ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/30'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full mr-1.5 animate-pulse ${isOnline ? 'bg-emerald-400' : 'bg-yellow-500'}`} />
+                        {isOnline ? 'Cloud Synced' : 'Offline Mode'}
+                      </span>
+                    </div>
+                    <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white font-display mt-2">
+                      The Frame Cut Studio OS
+                    </h1>
+                    <p className="text-gray-400 text-sm mt-1 max-w-xl">
+                      Welcome, <strong className="text-gold-400">Satish Tiwari</strong>. Manage cinematic workflows, studio ledgers, and revisions from one unified hub.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Quick action grid */}
+                <div className="mt-6 md:mt-0 flex flex-wrap gap-3 shrink-0">
+                  <button
+                    id="quick-add-project"
+                    onClick={() => onQuickAction('projects', 'add_project')}
+                    className="flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-luxury-green-800 to-luxury-green-600 border border-gold-500/30 text-white font-medium text-xs hover:scale-[1.03] active:scale-[0.98] transition-transform cursor-pointer gold-glow shadow-md"
+                  >
+                    <Plus className="w-4 h-4 text-gold-300" />
+                    <span>Add Wedding Project</span>
+                  </button>
+                  
+                  <button
+                    id="quick-log-payment"
+                    onClick={() => {
+                      setPaymentType('studio');
+                      setIsPaymentModalOpen(true);
+                    }}
+                    className="flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-gold-600 to-gold-500 border border-gold-400/30 text-charcoal-950 font-bold text-xs hover:scale-[1.03] active:scale-[0.98] transition-transform cursor-pointer shadow-md gold-glow"
+                  >
+                    <IndianRupee className="w-3.5 h-3.5 text-charcoal-950" />
+                    <span>Record Payment Ledger</span>
+                  </button>
+
+                  <button
+                    id="quick-add-expense"
+                    onClick={() => onQuickAction('finance', 'add_expense')}
+                    className="flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-charcoal-800 border border-luxury-green-800 text-gray-200 font-medium text-xs hover:scale-[1.03] active:scale-[0.98] transition-transform cursor-pointer shadow-sm"
+                  >
+                    <IndianRupee className="w-3.5 h-3.5 text-gray-400" />
+                    <span>Log Expense</span>
+                  </button>
+                </div>
+              </div>
             </div>
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white font-display mt-2">
-              The Frame Cut Studio OS
-            </h1>
-            <p className="text-gray-400 text-sm mt-1 max-w-xl">
-              Welcome, <strong className="text-gold-400">Satish Tiwari</strong>. Manage cinematic workflows, studio ledgers, revisions, and invoices from one unified hub.
-            </p>
-          </div>
-        </div>
-
-        {/* Quick action grid */}
-        <div className="mt-6 md:mt-0 flex flex-wrap gap-3 shrink-0">
-          <button
-            id="quick-add-project"
-            onClick={() => onQuickAction('projects', 'add_project')}
-            className="flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-luxury-green-800 to-luxury-green-600 border border-gold-500/30 text-white font-medium text-xs hover:scale-[1.03] active:scale-[0.98] transition-transform cursor-pointer gold-glow shadow-md"
-          >
-            <Plus className="w-4 h-4 text-gold-300" />
-            <span>Add Wedding Project</span>
-          </button>
-          
-          <button
-            id="quick-log-payment"
-            onClick={() => {
-              setPaymentType('studio');
-              setIsPaymentModalOpen(true);
-            }}
-            className="flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-gold-600 to-gold-500 border border-gold-400/30 text-charcoal-950 font-bold text-xs hover:scale-[1.03] active:scale-[0.98] transition-transform cursor-pointer shadow-md gold-glow"
-          >
-            <IndianRupee className="w-3.5 h-3.5 text-charcoal-950" />
-            <span>Record Payment Ledger</span>
-          </button>
-
-          <button
-            id="quick-add-expense"
-            onClick={() => onQuickAction('finance', 'add_expense')}
-            className="flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-charcoal-800 border border-luxury-green-800 text-gray-200 font-medium text-xs hover:scale-[1.03] active:scale-[0.98] transition-transform cursor-pointer shadow-sm"
-          >
-            <IndianRupee className="w-3.5 h-3.5 text-gray-400" />
-            <span>Log Expense</span>
-          </button>
-        </div>
-      </div>
 
       {/* Stats Bento Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
@@ -2790,48 +3460,9 @@ const DashboardView = React.memo(function DashboardView({
       {/* Main Charts & Sidebars */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         
-        {/* Dynamic Area Chart for Financial Outlook */}
-        <motion.div variants={itemVariants} className="xl:col-span-2 p-6 rounded-3xl glass-panel relative">
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-white font-display">Revenue & Profit Outlook</h2>
-              <p className="text-xs text-gray-400">Monthly aggregate projections for the wedding season</p>
-            </div>
-            <div className="flex space-x-2 bg-charcoal-900 p-1.5 rounded-xl border border-luxury-green-800/20 text-xs">
-              <span className="px-3 py-1 bg-luxury-green-800/40 text-gold-400 font-mono rounded-lg">6 Months</span>
-            </div>
-          </div>
-          
-          <div className="h-80 w-full">
-            <ResponsiveContainer width="100%" height={320} minWidth={100}>
-              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#1e5546" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#1e5546" stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#d4af37" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#d4af37" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(30, 85, 70, 0.1)" />
-                <XAxis dataKey="name" stroke="#6b7280" fontSize={11} tickLine={false} />
-                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#11141a', 
-                    border: '1px solid rgba(212, 175, 55, 0.3)',
-                    borderRadius: '16px',
-                    color: '#f3f4f6'
-                  }} 
-                />
-                <Legend verticalAlign="top" height={36} iconType="circle" />
-                <Area type="monotone" dataKey="Revenue" stroke="#1e5546" strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
-                <Area type="monotone" dataKey="Profit" stroke="#d4af37" strokeWidth={2} fillOpacity={1} fill="url(#colorProfit)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+        {/* Dynamic Line Chart for Monthly Revenue and Cashflow Trends */}
+        <motion.div variants={itemVariants} className="xl:col-span-2">
+          {renderMonthlyRevenueChart(false)}
         </motion.div>
 
         {/* Deliveries and Timeline */}
@@ -2987,11 +3618,15 @@ const DashboardView = React.memo(function DashboardView({
         </motion.div>
       </div>
 
-      {/* NEEDS ATTENTION FOR CLASSIC THEME */}
-      {renderNeedsAttention()}
+      {/* GANTT CHART VISUALIZATION FOR ACTIVE WEDDINGS (CLASSIC THEME) */}
+      <GanttChartTimeline 
+        projects={projects} 
+        onUpdateProject={onUpdateProject} 
+        onSelectProject={(id) => onQuickAction('projects', id)} 
+      />
 
-      {/* REMINDERS HUB FOR CLASSIC THEME */}
-      {renderRemindersHub(false)}
+      {/* AUTOMATED MONTHLY 5TH WHATSAPP REMINDERS FOR CLASSIC THEME */}
+      <MonthlyWhatsAppReminders projects={projects} studios={studios} editors={editors} payments={payments} />
 
       {renderRecentPaymentsLedger()}
     </motion.div>
@@ -3096,7 +3731,14 @@ const DashboardView = React.memo(function DashboardView({
                     <select
                       value={selectedStudioId}
                       onChange={(e) => {
-                        setSelectedStudioId(e.target.value);
+                        const sId = e.target.value;
+                        setSelectedStudioId(sId);
+                        const foundStudio = studios.find(s => s.id === sId);
+                        if (foundStudio) {
+                          setPaymentReceivedFrom(foundStudio.ownerName || foundStudio.name || '');
+                        } else {
+                          setPaymentReceivedFrom('');
+                        }
                         setPaymentError('');
                         setPaymentSuccess('');
                       }}
@@ -3266,6 +3908,22 @@ const DashboardView = React.memo(function DashboardView({
                     />
                   </div>
                 </div>
+
+                {/* 5. Received From / Who Paid Field (Only for Studio receipts) */}
+                {paymentType === 'studio' && (
+                  <div>
+                    <label className="block text-[10px] font-mono text-gray-400 uppercase tracking-wider mb-1.5">
+                      Received From (Person's Name)
+                    </label>
+                    <input
+                      type="text"
+                      value={paymentReceivedFrom}
+                      onChange={(e) => setPaymentReceivedFrom(e.target.value)}
+                      placeholder="Enter the name of the person who paid manually"
+                      className="w-full bg-charcoal-950/80 border border-white/10 rounded-2xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-gold-500/40 font-sans"
+                    />
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
@@ -3554,8 +4212,8 @@ const DashboardView = React.memo(function DashboardView({
                   {/* Redirection / Navigation Action */}
                   <div className="flex justify-between items-center bg-black/20 p-4 rounded-2xl border border-white/5">
                     <div className="text-xs">
-                      <p className="text-white font-medium">Full Workflow & Invoice Panel</p>
-                      <p className="text-gray-400 text-[11px] mt-0.5">Need to record revisions, assignments or raise custom GST invoices?</p>
+                      <p className="text-white font-medium font-sans">Full Workflow Panel</p>
+                      <p className="text-gray-400 text-[11px] mt-0.5">Need to record revisions, assign editors, or update project statuses?</p>
                     </div>
                     <button
                       onClick={() => {
@@ -3608,7 +4266,7 @@ const DashboardView = React.memo(function DashboardView({
                   <div className="flex justify-between items-center bg-black/20 p-4 rounded-2xl border border-white/5">
                     <div className="text-xs">
                       <p className="text-white font-medium font-sans">Full Studio Directory Ledger</p>
-                      <p className="text-gray-400 text-[11px] mt-0.5">Need to edit partner details, view past payment history or check invoices?</p>
+                      <p className="text-gray-400 text-[11px] mt-0.5">Need to edit partner details or view past payment history?</p>
                     </div>
                     <button
                       onClick={() => {

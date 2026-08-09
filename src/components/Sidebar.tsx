@@ -6,7 +6,6 @@ import {
   Users, 
   IndianRupee, 
   HardDrive, 
-  Receipt, 
   BarChart3, 
   Calendar, 
   Bell, 
@@ -19,7 +18,11 @@ import {
   Sparkles,
   Heart,
   MoreHorizontal,
-  X
+  X,
+  Plus,
+  Receipt,
+  TrendingUp,
+  PieChart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { UserProfile } from '../types';
@@ -41,16 +44,16 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
   // Define ALL possible navigation items
   const allNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin'] },
-    { id: 'gemini', label: 'Gemini AI', icon: Sparkles, roles: ['admin', 'editor', 'studio'] },
+    { id: 'financial_overview', label: 'Financial Overview', icon: TrendingUp, roles: ['admin', 'studio', 'editor'] },
     { id: 'projects', label: 'Projects', icon: Film, roles: ['admin', 'editor', 'studio'] },
-    { id: 'registry', label: 'Wedding Registry', icon: Heart, roles: ['admin', 'editor', 'studio'] },
+    { id: 'registry', label: 'New Project', icon: Plus, roles: ['admin', 'editor', 'studio'] },
+    { id: 'invoice', label: 'Invoice', icon: Receipt, roles: ['admin', 'studio'] },
     { id: 'studios', label: 'Studios', icon: Building2, roles: ['admin'] },
     { id: 'editors', label: 'Editors', icon: Laptop, roles: ['admin', 'editor'] },
-    { id: 'finance', label: 'Finance', icon: IndianRupee, roles: ['admin'] },
     { id: 'datamanager', label: 'Data Manager', icon: HardDrive, roles: ['admin'] },
-    { id: 'invoice', label: 'Invoice', icon: Receipt, roles: ['admin', 'studio'] },
-    { id: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin'] },
     { id: 'calendar', label: 'Calendar', icon: Calendar, roles: ['admin', 'editor'] },
+    { id: 'gemini', label: 'Gemini AI', icon: Sparkles, roles: ['admin', 'editor', 'studio'] },
+    { id: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin'] },
     { id: 'notifications', label: 'Notifications', icon: Bell, roles: ['admin', 'editor', 'studio'] },
     { id: 'settings', label: 'Settings', icon: Settings, roles: ['admin'] },
   ];
@@ -64,9 +67,9 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
       case 'editor':
         return ['projects', 'gemini', 'calendar', 'notifications'];
       case 'studio':
-        return ['projects', 'gemini', 'registry', 'invoice'];
+        return ['projects', 'gemini', 'notifications'];
       default: // admin
-        return ['dashboard', 'projects', 'registry', 'finance'];
+        return ['dashboard', 'projects', 'financial_overview', 'reports'];
     }
   };
 
@@ -325,19 +328,28 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
               const isActive = activeTab === item.id;
               
               return (
-                <button
+                <motion.button
                   key={item.id}
                   id={`nav-link-${item.id}`}
                   onClick={() => {
                     setActiveTab(item.id);
                   }}
-                  className={`w-full flex items-center space-x-3 px-4 py-3.5 rounded-2xl transition-all duration-200 group relative ${
+                  whileTap={{ scale: 0.96 }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3.5 rounded-2xl transition-colors duration-200 group relative ${
                     isActive 
-                      ? 'bg-gradient-to-r from-gold-500/20 via-luxury-green-900/35 to-transparent text-gold-300 border-l-4 border-gold-400 shadow-[0_0_15px_rgba(212,175,55,0.15)] font-semibold' 
+                      ? 'text-gold-300 font-semibold' 
                       : 'text-gray-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
-                  <Icon className={`w-5 h-5 shrink-0 transition-transform duration-200 group-hover:scale-110 ${isActive ? 'text-gold-400 filter drop-shadow-[0_0_5px_rgba(255,209,92,0.6)]' : 'text-gray-400'}`} />
+                  {isActive && (
+                    <motion.div
+                      layoutId="sidebarActivePill"
+                      className="absolute inset-0 rounded-2xl bg-gradient-to-r from-gold-500/20 via-luxury-green-900/35 to-transparent border-l-4 border-gold-400 shadow-[0_0_20px_rgba(212,175,55,0.18)]"
+                      transition={{ type: "spring", stiffness: 400, damping: 32 }}
+                    />
+                  )}
+
+                  <Icon className={`w-5 h-5 shrink-0 transition-transform duration-200 group-hover:scale-110 z-10 ${isActive ? 'text-gold-400 filter drop-shadow-[0_0_5px_rgba(255,209,92,0.6)]' : 'text-gray-400'}`} />
                   
                   <AnimatePresence initial={false}>
                     {isExpanded && (
@@ -345,7 +357,7 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
                         initial={{ opacity: 0, width: 0 }}
                         animate={{ opacity: 1, width: 'auto' }}
                         exit={{ opacity: 0, width: 0 }}
-                        className="text-sm font-medium tracking-wide whitespace-nowrap overflow-hidden"
+                        className="text-sm font-medium tracking-wide whitespace-nowrap overflow-hidden z-10"
                       >
                         {item.label}
                       </motion.span>
@@ -358,7 +370,7 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
                       {item.label}
                     </div>
                   )}
-                </button>
+                </motion.button>
               );
             })}
           </nav>

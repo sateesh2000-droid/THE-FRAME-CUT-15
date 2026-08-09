@@ -8,15 +8,16 @@ import {
   doc, 
   deleteDoc, 
   setDoc,
+  getDoc,
   serverTimestamp 
 } from 'firebase/firestore';
 import { db, seedDatabaseIfEmpty } from './firebase';
+import { compressImage } from './utils';
 import { 
   Project, 
   Studio, 
   Editor, 
   Expense, 
-  Invoice, 
   AppNotification, 
   CalendarEvent, 
   Revision, 
@@ -25,6 +26,9 @@ import {
   UserRole
 } from './types';
 
+// Parallax Design Background
+import ParallaxBackground from './components/ParallaxBackground';
+
 // Importing Views
 import Sidebar from './components/Sidebar';
 import DashboardView from './components/DashboardView';
@@ -32,15 +36,17 @@ import ProjectsView from './components/ProjectsView';
 import RegistryView from './components/RegistryView';
 import StudiosView from './components/StudiosView';
 import EditorsView from './components/EditorsView';
-import FinanceView from './components/FinanceView';
 import DataManagerView from './components/DataManagerView';
-import InvoiceView from './components/InvoiceView';
 import ReportsView from './components/ReportsView';
 import CalendarView from './components/CalendarView';
 import NotificationsView from './components/NotificationsView';
 import SettingsView from './components/SettingsView';
 import LoginView from './components/LoginView';
 import GeminiAIView from './components/GeminiAIView';
+import InvoiceView from './components/InvoiceView';
+import FinancialOverviewView from './components/FinancialOverviewView';
+import { useDeadlineRunner } from './hooks/useDeadlineRunner';
+import { Zap, X } from 'lucide-react';
 
 // Helper to convert any Firebase/JS timestamp or date safely to milliseconds
 const getTimestampMs = (val: any): number => {
@@ -64,9 +70,10 @@ export default function App() {
   const lastCheckedSignatureRef = React.useRef<string>('');
 
   // Color Palette/Theme preference with local storage persistence
-  const [theme, setTheme] = useState<'luxury-green' | 'midnight-gold'>(() => {
+  const [theme, setTheme] = useState<'luxury-green' | 'midnight-gold' | 'royal-sapphire'>(() => {
     const saved = localStorage.getItem('tfc_theme');
-    return (saved === 'midnight-gold') ? 'midnight-gold' : 'luxury-green';
+    if (saved === 'midnight-gold' || saved === 'royal-sapphire') return saved;
+    return 'luxury-green';
   });
 
   useEffect(() => {
@@ -86,11 +93,21 @@ export default function App() {
   const [studios, setStudios] = useState<Studio[]>([]);
   const [editors, setEditors] = useState<Editor[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [payments, setPayments] = useState<PaymentHistory[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
+
+  // Initialize Background Deadline Task Runner Service
+  const {
+    isRunning: runnerIsRunning,
+    lastCheckTime: runnerLastCheckTime,
+    checkCount: runnerCheckCount,
+    recentToastMessage: runnerToastMessage,
+    dismissToast: dismissRunnerToast,
+    triggerManualCheck: handleRunnerManualCheck
+  } = useDeadlineRunner(calendarEvents, notifications);
 
   // 1. Online / Offline network detection listener
   useEffect(() => {
@@ -114,29 +131,11 @@ export default function App() {
     runSeed();
   }, []);
 
-  // 3. Simulated persistent login session
+  // 3. Require password on every page open / refresh (no auto-persistent session)
   useEffect(() => {
-    try {
-      const savedUser = localStorage.getItem('tfc_user');
-      if (savedUser) {
-        const parsed = JSON.parse(savedUser);
-        if (parsed && typeof parsed === 'object') {
-          setCurrentUser(parsed);
-          // Editors default to their assigned tab
-          if (parsed.role === 'editor') {
-            setActiveTab('projects');
-          } else if (parsed.role === 'studio') {
-            setActiveTab('projects');
-          }
-        } else {
-          // If the parsed result is not a valid object, clear it
-          localStorage.removeItem('tfc_user');
-        }
-      }
-    } catch (e) {
-      console.error("Failed to parse tfc_user session from local storage. Cleaning up...", e);
-      localStorage.removeItem('tfc_user');
-    }
+    // Clear any cached user session on page load so user must log in with password every time
+    localStorage.removeItem('tfc_user');
+    setCurrentUser(null);
   }, []);
 
   // 4. Real-time Firestore Subscriptions
@@ -145,7 +144,6 @@ export default function App() {
     let unsubStudios = () => {};
     let unsubEditors = () => {};
     let unsubExpenses = () => {};
-    let unsubInvoices = () => {};
     let unsubNotifs = () => {};
     let unsubCalendar = () => {};
     let unsubRevs = () => {};
@@ -217,21 +215,6 @@ export default function App() {
         }
       );
 
-      // Invoices Sync
-      unsubInvoices = onSnapshot(
-        collection(db, 'invoices'),
-        (snap) => {
-          const list: Invoice[] = [];
-          snap.forEach(docSnap => {
-            list.push({ ...docSnap.data() as any, id: docSnap.id });
-          });
-          setInvoices(list);
-        },
-        (error) => {
-          console.error("Error syncing invoices from Firestore:", error);
-        }
-      );
-
       // Notifications Sync
       unsubNotifs = onSnapshot(
         collection(db, 'notifications'),
@@ -295,6 +278,21 @@ export default function App() {
           console.error("Error syncing payments from Firestore:", error);
         }
       );
+
+      // Invoices Sync
+      onSnapshot(
+        collection(db, 'studioInvoices'),
+        (snap) => {
+          const list: any[] = [];
+          snap.forEach(docSnap => {
+            list.push({ ...docSnap.data(), id: docSnap.id });
+          });
+          setInvoices(list);
+        },
+        (error) => {
+          console.error("Error syncing invoices from Firestore:", error);
+        }
+      );
     } catch (e) {
       console.error("Critical error setting up real-time subscriptions:", e);
     }
@@ -304,113 +302,12 @@ export default function App() {
       unsubStudios();
       unsubEditors();
       unsubExpenses();
-      unsubInvoices();
       unsubNotifs();
       unsubCalendar();
       unsubRevs();
       unsubPayments();
     };
   }, []);
-
-  // 5. Automated Invoice Due Date Notifications check
-  useEffect(() => {
-    if (invoices.length === 0) return;
-
-    // Build unique signature of current invoices state to prevent duplicate checks and infinite loops
-    const signature = invoices.map(i => `${i.id}:${i.status}:${i.dueDate}:${i.balanceDue}`).join(',');
-    if (lastCheckedSignatureRef.current === signature) {
-      return;
-    }
-    lastCheckedSignatureRef.current = signature;
-
-    const checkInvoiceDueDates = async () => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      for (const invoice of invoices) {
-        if (invoice.status === 'paid') {
-          // If the invoice is paid, clean up any pending notifications for it
-          const approachingId = `notif-approaching-${invoice.id}`;
-          const overdueId = `notif-overdue-${invoice.id}`;
-          const hasApproaching = notifications.some(n => n.id === approachingId);
-          const hasOverdue = notifications.some(n => n.id === overdueId);
-          
-          if (hasApproaching || hasOverdue) {
-            try {
-              if (hasApproaching) {
-                await deleteDoc(doc(db, 'notifications', approachingId));
-              }
-              if (hasOverdue) {
-                await deleteDoc(doc(db, 'notifications', overdueId));
-              }
-            } catch (e) {
-              console.error('Error clearing paid invoice notifications:', e);
-            }
-          }
-          continue;
-        }
-
-        const due = new Date(invoice.dueDate);
-        if (isNaN(due.getTime())) continue; // Safe date parsing guard
-        due.setHours(0, 0, 0, 0);
-
-        // Calculate difference in days
-        const diffTime = due.getTime() - today.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-        const studioId = invoice.studioId;
-
-        if (diffDays < 0) {
-          // Overdue invoice!
-          const overdueId = `notif-overdue-${invoice.id}`;
-          const existingNotif = notifications.find(n => n.id === overdueId);
-          if (!existingNotif) {
-            try {
-              await setDoc(doc(db, 'notifications', overdueId), {
-                id: overdueId,
-                title: `Invoice Overdue: ${invoice.id}`,
-                message: `Invoice ${invoice.id} for "${invoice.coupleName}" was due on ${invoice.dueDate} (overdue by ${Math.abs(diffDays)} day${Math.abs(diffDays) === 1 ? '' : 's'}). Outstanding balance: INR ${invoice.balanceDue.toLocaleString('en-IN')}.`,
-                type: 'payment_pending',
-                projectId: invoice.projectId,
-                studioId: studioId,
-                read: false,
-                createdAt: new Date()
-              });
-
-              // Also auto-update status to overdue if not already
-              if (invoice.status !== 'overdue') {
-                await updateDoc(doc(db, 'invoices', invoice.id), { status: 'overdue' });
-              }
-            } catch (e) {
-              console.error('Error creating overdue invoice notification:', e);
-            }
-          }
-        } else if (diffDays <= 3 && diffDays >= 0) {
-          // Approaching invoice (due within 3 days)
-          const approachingId = `notif-approaching-${invoice.id}`;
-          const existingNotif = notifications.find(n => n.id === approachingId);
-          if (!existingNotif) {
-            try {
-              await setDoc(doc(db, 'notifications', approachingId), {
-                id: approachingId,
-                title: `Invoice Due Approaching: ${invoice.id}`,
-                message: `Invoice ${invoice.id} for "${invoice.coupleName}" is due in ${diffDays} day${diffDays === 1 ? '' : 's'} (${invoice.dueDate}). Balance: INR ${invoice.balanceDue.toLocaleString('en-IN')}.`,
-                type: 'invoice_pending',
-                projectId: invoice.projectId,
-                studioId: studioId,
-                read: false,
-                createdAt: new Date()
-              });
-            } catch (e) {
-              console.error('Error creating approaching invoice notification:', e);
-            }
-          }
-        }
-      }
-    };
-
-    checkInvoiceDueDates();
-  }, [invoices, notifications]);
 
   // Helper to recursively remove undefined properties from objects to prevent Firestore setDoc/updateDoc failures.
   const cleanUndefined = (obj: any): any => {
@@ -485,16 +382,24 @@ export default function App() {
 
   // Studios CRUD
   const handleAddStudio = async (studio: Omit<Studio, 'createdAt'>) => {
+    let sanitizedStudio = { ...studio };
+    if (sanitizedStudio.logoUrl && sanitizedStudio.logoUrl.startsWith('data:image/')) {
+      sanitizedStudio.logoUrl = await compressImage(sanitizedStudio.logoUrl, 400, 400, 0.7);
+    }
     const docRef = doc(db, 'studios', studio.id);
     await setDoc(docRef, {
-      ...cleanUndefined(studio),
+      ...cleanUndefined(sanitizedStudio),
       createdAt: serverTimestamp()
     });
   };
 
   const handleUpdateStudio = async (id: string, updates: Partial<Studio>) => {
+    let sanitizedUpdates = { ...updates };
+    if (sanitizedUpdates.logoUrl && sanitizedUpdates.logoUrl.startsWith('data:image/')) {
+      sanitizedUpdates.logoUrl = await compressImage(sanitizedUpdates.logoUrl, 400, 400, 0.7);
+    }
     const docRef = doc(db, 'studios', id);
-    await updateDoc(docRef, cleanUndefined(updates));
+    await updateDoc(docRef, cleanUndefined(sanitizedUpdates));
   };
 
   const handleDeleteStudio = async (id: string) => {
@@ -534,30 +439,14 @@ export default function App() {
     });
   };
 
-  const handleDeleteExpense = async (id: string) => {
+  const handleUpdateExpense = async (id: string, updates: Partial<Expense>) => {
     const docRef = doc(db, 'expenses', id);
-    await deleteDoc(docRef);
-  };
-
-  const handleDeleteInvoice = async (id: string) => {
-    const docRef = doc(db, 'invoices', id);
-    await deleteDoc(docRef);
-  };
-
-  const handleUpdateInvoice = async (id: string, updates: Partial<Invoice>) => {
-    const docRef = doc(db, 'invoices', id);
     await updateDoc(docRef, cleanUndefined(updates));
   };
 
-  // Invoice creator
-  const handleAddInvoice = async (invoice: Omit<Invoice, 'id' | 'createdAt'>) => {
-    const generatedId = `INV-2026-${Date.now().toString().slice(-4)}`;
-    const docRef = doc(db, 'invoices', generatedId);
-    await setDoc(docRef, {
-      ...cleanUndefined(invoice),
-      id: generatedId,
-      createdAt: serverTimestamp()
-    });
+  const handleDeleteExpense = async (id: string) => {
+    const docRef = doc(db, 'expenses', id);
+    await deleteDoc(docRef);
   };
 
   // Settle Editor Payment ledger
@@ -571,9 +460,22 @@ export default function App() {
     });
   };
 
-  const handleDeletePayment = async (id: string) => {
+  const handleUpdatePayment = async (id: string, updates: Partial<PaymentHistory>) => {
     const docRef = doc(db, 'editorPayments', id);
-    await deleteDoc(docRef);
+    await updateDoc(docRef, cleanUndefined(updates));
+  };
+
+  const handleDeletePayment = async (id: string) => {
+    try {
+      console.log("handleDeletePayment initiating for ID:", id);
+      const docRef = doc(db, 'editorPayments', id);
+      await deleteDoc(docRef);
+      console.log("handleDeletePayment completed successfully for ID:", id);
+    } catch (error) {
+      console.error("Error deleting payment document:", error);
+      alert("Failed to delete transaction: " + (error instanceof Error ? error.message : String(error)));
+      throw error;
+    }
   };
 
   // Notification managers
@@ -587,6 +489,49 @@ export default function App() {
     await deleteDoc(docRef);
   };
 
+  const handleClearAllNotifications = async () => {
+    notifications.forEach(async (n) => {
+      await deleteDoc(doc(db, 'notifications', n.id));
+    });
+  };
+
+  // Invoice Draft Save & Delete
+  const handleSaveInvoiceDraft = async (invoiceData: any) => {
+    const docId = invoiceData.invoiceNo || `AI-2026-${Date.now().toString().slice(-4)}`;
+    const docRef = doc(db, 'studioInvoices', docId);
+    await setDoc(docRef, {
+      ...cleanUndefined(invoiceData),
+      id: docId,
+      createdAt: serverTimestamp()
+    });
+  };
+
+  const handleDeleteInvoiceDraft = async (id: string) => {
+    const docRef = doc(db, 'studioInvoices', id);
+    await deleteDoc(docRef);
+  };
+
+  // Calendar Events CRUD
+  const handleAddCalendarEvent = async (evt: Omit<CalendarEvent, 'id'>) => {
+    const generatedId = `evt-${Date.now()}`;
+    const docRef = doc(db, 'calendar', generatedId);
+    await setDoc(docRef, {
+      ...cleanUndefined(evt),
+      id: generatedId,
+      createdAt: serverTimestamp()
+    });
+  };
+
+  const handleUpdateCalendarEvent = async (id: string, updates: Partial<CalendarEvent>) => {
+    const docRef = doc(db, 'calendar', id);
+    await updateDoc(docRef, cleanUndefined(updates));
+  };
+
+  const handleDeleteCalendarEvent = async (id: string) => {
+    const docRef = doc(db, 'calendar', id);
+    await deleteDoc(docRef);
+  };
+
   // Clear / Reset Entire database
   const handleResetDatabase = async () => {
     // Clear all existing manually (seedDatabaseIfEmpty automatically bypasses if studios present, so we clean)
@@ -594,7 +539,6 @@ export default function App() {
     studios.forEach(s => deleteDoc(doc(db, 'studios', s.id)));
     editors.forEach(ed => deleteDoc(doc(db, 'editors', ed.id)));
     expenses.forEach(e => deleteDoc(doc(db, 'expenses', e.id)));
-    invoices.forEach(i => deleteDoc(doc(db, 'invoices', i.id)));
     notifications.forEach(n => deleteDoc(doc(db, 'notifications', n.id)));
     calendarEvents.forEach(c => deleteDoc(doc(db, 'calendar', c.id)));
     revisions.forEach(r => deleteDoc(doc(db, 'revisionHistory', r.id)));
@@ -606,20 +550,79 @@ export default function App() {
     }, 1000);
   };
 
+  // Helper for deterministic user ID
+  const getUserUid = (email: string, role: string) => {
+    const cleanEmail = email.toLowerCase().trim().replace(/[^a-z0-9]/g, '_');
+    if (cleanEmail.includes('satish') || cleanEmail.includes('sateesh')) return 'admin-satish';
+    if (cleanEmail.includes('vansh')) return 'editor-vansh-auth';
+    if (cleanEmail.includes('weddingbykk') || cleanEmail.includes('kk')) return 'studio-kk-auth';
+    return `${role}-${cleanEmail}`;
+  };
+
   // --- Login handler ---
   const handleLogin = async (email: string, role: UserRole, id?: string) => {
+    const userUid = getUserUid(email, role);
+
+    let defaultName = 'Satish Tiwari';
+    if (email === 'vansh@framecut.com' || email === 'vansh2000') {
+      defaultName = 'Vansh Tiwari';
+    } else if (email === 'kk@weddingbykk.com') {
+      defaultName = 'Wedding By KK';
+    }
+
+    let loadedPhotoURL: string | undefined = undefined;
+    let loadedName: string = defaultName;
+
+    // 1. First check localStorage for cached profile
+    try {
+      const cached = localStorage.getItem(`tfc_user_profile_${userUid}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.photoURL) loadedPhotoURL = parsed.photoURL;
+        if (parsed.name) loadedName = parsed.name;
+      }
+    } catch (e) {
+      console.error("Error reading cached profile from localStorage:", e);
+    }
+
+    // 2. Try fetching from Firestore doc `users/{userUid}`
+    try {
+      const userDocRef = doc(db, 'users', userUid);
+      const userSnap = await getDoc(userDocRef);
+      if (userSnap.exists()) {
+        const data = userSnap.data();
+        if (data.photoURL) loadedPhotoURL = data.photoURL;
+        if (data.name) loadedName = data.name;
+      } else {
+        // Initialize doc in Firestore
+        await setDoc(userDocRef, {
+          uid: userUid,
+          email,
+          name: loadedName,
+          role,
+          photoURL: loadedPhotoURL || null,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.error("Error fetching or initializing user document from Firestore:", e);
+    }
+
     const profile: UserProfile = {
-      uid: `${role}-uid-${Date.now()}`,
+      uid: userUid,
       email,
-      name: (email === 'satish@framecut.com' || email === 'sateesh2000') ? 'Satish Tiwari' : (email === 'vansh@framecut.com' || email === 'vansh2000') ? 'Vansh Tiwari' : 'Wedding By KK',
+      name: loadedName,
+      photoURL: loadedPhotoURL,
       role,
       studioId: role === 'studio' ? id : undefined,
       editorId: role === 'editor' ? id : undefined,
       createdAt: new Date()
     };
+
     setCurrentUser(profile);
-    localStorage.setItem('tfc_user', JSON.stringify(profile));
-    
+    localStorage.setItem(`tfc_user_profile_${userUid}`, JSON.stringify(profile));
+
     // Redirect role-specific defaults
     if (role === 'editor' || role === 'studio') {
       setActiveTab('projects');
@@ -631,6 +634,57 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('tfc_user');
+  };
+
+  const handleUpdateProfile = async (updates: Partial<UserProfile>) => {
+    if (!currentUser) return;
+
+    let finalPhotoURL = updates.photoURL !== undefined ? updates.photoURL : currentUser.photoURL;
+    if (finalPhotoURL && finalPhotoURL.startsWith('data:image/')) {
+      finalPhotoURL = await compressImage(finalPhotoURL, 300, 300, 0.7);
+    }
+
+    const updatedProfile: UserProfile = {
+      ...currentUser,
+      ...updates,
+      photoURL: finalPhotoURL
+    };
+
+    setCurrentUser(updatedProfile);
+    localStorage.setItem(`tfc_user_profile_${currentUser.uid}`, JSON.stringify(updatedProfile));
+
+    try {
+      // Sync update to firestore users collection
+      const docRef = doc(db, 'users', currentUser.uid);
+      await setDoc(docRef, {
+        name: updatedProfile.name,
+        photoURL: updatedProfile.photoURL || null,
+        email: updatedProfile.email,
+        role: updatedProfile.role,
+        uid: updatedProfile.uid,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      // If user is an editor, sync photoURL to editor card in editors collection
+      if (currentUser.editorId && finalPhotoURL) {
+        const editorRef = doc(db, 'editors', currentUser.editorId);
+        await updateDoc(editorRef, {
+          photo: finalPhotoURL,
+          name: updatedProfile.name
+        });
+      }
+
+      // If user is a studio, sync photoURL to studio logoUrl in studios collection
+      if (currentUser.studioId && finalPhotoURL) {
+        const studioRef = doc(db, 'studios', currentUser.studioId);
+        await updateDoc(studioRef, {
+          logoUrl: finalPhotoURL,
+          ownerName: updatedProfile.name
+        });
+      }
+    } catch (e) {
+      console.error("Error updating user profile in Firestore:", e);
+    }
   };
 
   const handleQuickAction = (tab: string, subAction?: string) => {
@@ -699,10 +753,12 @@ export default function App() {
             calendarEvents={calendarEvents}
             onQuickAction={handleQuickAction}
             isOnline={isOnline}
-            invoices={invoices}
             payments={payments}
             onLogPayment={handleLogPayment}
             onUpdateProject={handleUpdateProject}
+            onDeleteProject={handleDeleteProject}
+            onDeletePayment={handleDeletePayment}
+            onUpdatePayment={handleUpdatePayment}
           />
         );
       case 'gemini':
@@ -712,7 +768,6 @@ export default function App() {
             studios={studios}
             editors={editors}
             expenses={expenses}
-            invoices={invoices}
             calendarEvents={calendarEvents}
             currentUser={currentUser}
           />
@@ -726,6 +781,8 @@ export default function App() {
             userRole={currentUser?.role || 'admin'}
             currentStudioId={currentUser?.studioId}
             onAddProject={handleAddProject}
+            onUpdateProject={handleUpdateProject}
+            onDeleteProject={handleDeleteProject}
             onRedirectToProjects={() => setActiveTab('projects')}
           />
         );
@@ -736,6 +793,7 @@ export default function App() {
             studios={studios}
             editors={editors}
             revisions={revisions}
+            calendarEvents={calendarEvents}
             userRole={currentUser?.role || 'admin'}
             currentStudioId={currentUser?.studioId}
             onAddProject={handleAddProject}
@@ -753,14 +811,12 @@ export default function App() {
           <StudiosView
             studios={studios}
             projects={projects}
-            invoices={invoices}
             onAddStudio={handleAddStudio}
             onUpdateStudio={handleUpdateStudio}
             onDeleteStudio={handleDeleteStudio}
-            onDeleteInvoice={handleDeleteInvoice}
-            onUpdateInvoice={handleUpdateInvoice}
           />
         );
+
       case 'editors':
         return (
           <EditorsView
@@ -778,17 +834,33 @@ export default function App() {
           />
         );
       case 'finance':
+      case 'financial_overview':
         return (
-          <FinanceView
+          <FinancialOverviewView
             projects={projects}
             expenses={expenses}
             editors={editors}
             studios={studios}
             payments={payments}
-            invoices={invoices}
             onAddExpense={handleAddExpense}
+            onUpdateExpense={handleUpdateExpense}
             onDeleteExpense={handleDeleteExpense}
-            initialTriggerAction={subActionTrigger === 'add_expense' ? 'add_expense' : undefined}
+            onUpdatePayment={handleUpdatePayment}
+            onDeletePayment={handleDeletePayment}
+            onNavigateTab={(tab) => setActiveTab(tab)}
+          />
+        );
+      case 'invoice':
+        return (
+          <InvoiceView
+            projects={projects}
+            studios={studios}
+            payments={payments}
+            invoices={invoices}
+            currentUser={currentUser}
+            onLogPayment={handleLogPayment}
+            onSaveInvoiceDraft={handleSaveInvoiceDraft}
+            onDeleteInvoiceDraft={handleDeleteInvoiceDraft}
           />
         );
       case 'datamanager':
@@ -796,19 +868,10 @@ export default function App() {
           <DataManagerView
             projects={roleFilteredProjects}
             onUpdateProject={handleUpdateProject}
+            onDeleteProject={handleDeleteProject}
           />
         );
-      case 'invoice':
-        return (
-          <InvoiceView
-            projects={roleFilteredProjects}
-            studios={studios}
-            invoices={invoices}
-            onAddInvoice={handleAddInvoice}
-            onDeleteInvoice={handleDeleteInvoice}
-            onUpdateInvoice={handleUpdateInvoice}
-          />
-        );
+
       case 'reports':
         return (
           <ReportsView
@@ -823,14 +886,23 @@ export default function App() {
           <CalendarView
             projects={roleFilteredProjects}
             events={calendarEvents}
+            onAddEvent={handleAddCalendarEvent}
+            onUpdateEvent={handleUpdateCalendarEvent}
+            onDeleteEvent={handleDeleteCalendarEvent}
           />
         );
       case 'notifications':
         return (
           <NotificationsView
             notifications={roleFilteredNotifications}
+            calendarEvents={calendarEvents}
+            runnerIsRunning={runnerIsRunning}
+            runnerLastCheckTime={runnerLastCheckTime}
+            runnerCheckCount={runnerCheckCount}
+            onRunnerManualCheck={handleRunnerManualCheck}
             onMarkRead={handleMarkRead}
             onClearNotification={handleClearNotification}
+            onClearAllNotifications={handleClearAllNotifications}
           />
         );
       case 'settings':
@@ -839,13 +911,13 @@ export default function App() {
             onResetDatabase={handleResetDatabase}
             isOnline={isOnline}
             currentUser={currentUser}
+            onUpdateProfile={handleUpdateProfile}
             theme={theme}
             onThemeChange={setTheme}
             projects={projects}
             studios={studios}
             editors={editors}
             expenses={expenses}
-            invoices={invoices}
             calendarEvents={calendarEvents}
             revisions={revisions}
             payments={payments}
@@ -862,7 +934,9 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col md:flex-row min-h-screen bg-charcoal-950 text-gray-200">
+    <div className="flex flex-col md:flex-row min-h-screen bg-charcoal-950 text-gray-200 relative overflow-x-hidden">
+      {/* Multi-layered Parallax Ambient Background Canvas */}
+      <ParallaxBackground />
       
       {/* Floating sidebar menu */}
       <Sidebar
@@ -875,22 +949,52 @@ export default function App() {
       {/* Sidebar layout spacer to reserve space on desktop and prevent reflows on hover */}
       <div className="hidden md:block w-24 shrink-0 mr-4" />
 
-      {/* Main View Container */}
-      <main id="main-content-flow" className="flex-1 p-4 md:p-8 md:pl-6 overflow-x-hidden min-h-screen">
+      {/* Main View Container with Parallax Perspective */}
+      <main id="main-content-flow" className="flex-1 p-4 md:p-8 md:pl-6 overflow-x-hidden min-h-screen relative z-10">
         <div className="max-w-7xl mx-auto pb-28 md:pb-16">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.25, ease: 'easeInOut' }}
+              initial={{ opacity: 0, y: 14, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: -10, filter: 'blur(2px)' }}
+              transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full"
             >
               {renderView()}
             </motion.div>
           </AnimatePresence>
         </div>
       </main>
+
+      {/* Floating Automated Background Runner Toast Notification */}
+      <AnimatePresence>
+        {runnerToastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            className="fixed bottom-6 right-6 z-50 max-w-md p-4 rounded-2xl bg-charcoal-900/95 border border-gold-500/50 text-white shadow-2xl backdrop-blur-md flex items-start justify-between space-x-3 gold-glow"
+          >
+            <div className="flex items-start space-x-3">
+              <div className="p-2 rounded-xl bg-gold-500/20 text-gold-400 shrink-0 mt-0.5">
+                <Zap className="w-5 h-5" />
+              </div>
+              <div className="text-xs font-mono">
+                <div className="font-bold text-gold-400 uppercase tracking-wide">Automated Deadline Runner</div>
+                <div className="text-gray-200 mt-1 leading-relaxed">{runnerToastMessage}</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={dismissRunnerToast}
+              className="p-1 hover:bg-white/10 text-gray-400 hover:text-white rounded-lg transition-colors cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

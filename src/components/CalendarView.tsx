@@ -7,20 +7,37 @@ import {
   Clock, 
   Tv, 
   AlertTriangle,
-  Info
+  Info,
+  Plus,
+  Edit,
+  Trash2,
+  X
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Project, CalendarEvent } from '../types';
 
 interface CalendarViewProps {
   projects: Project[];
   events: CalendarEvent[];
   onAddEvent?: (event: Omit<CalendarEvent, 'id'>) => Promise<void>;
+  onUpdateEvent?: (id: string, updates: Partial<CalendarEvent>) => Promise<void>;
+  onDeleteEvent?: (id: string) => Promise<void>;
 }
 
-export default function CalendarView({ projects, events }: CalendarViewProps) {
+export default function CalendarView({ projects, events, onAddEvent, onUpdateEvent, onDeleteEvent }: CalendarViewProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [filterType, setFilterType] = useState<'all' | 'delivery' | 'shoot' | 'revision'>('all');
+
+  // Event modal states
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
+  const [eventToDeleteId, setEventToDeleteId] = useState<string | null>(null);
+
+  // Form fields
+  const [evtTitle, setEvtTitle] = useState('');
+  const [evtDate, setEvtDate] = useState('');
+  const [evtType, setEvtType] = useState<'delivery' | 'shoot' | 'revision'>('delivery');
+  const [evtColor, setEvtColor] = useState('#3B82F6');
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -113,6 +130,18 @@ export default function CalendarView({ projects, events }: CalendarViewProps) {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
+            onClick={() => {
+              setEvtTitle('');
+              setEvtDate(new Date().toISOString().split('T')[0]);
+              setEvtType('delivery');
+              setEvtColor('#10B981');
+              setIsAddModalOpen(true);
+            }}
+            className="px-3 py-2 bg-gradient-to-r from-gold-500 to-gold-600 text-charcoal-950 font-bold rounded-xl text-xs font-mono flex items-center gap-1.5 cursor-pointer shadow-md hover:scale-105 transition-all"
+          >
+            <Plus className="w-3.5 h-3.5" /> Schedule Event
+          </button>
+          <button
             onClick={() => setFilterType('all')}
             className={`px-3 py-2 rounded-xl text-xs font-mono transition-all ${filterType === 'all' ? 'bg-luxury-green-800 text-gold-400 font-bold' : 'bg-charcoal-900 text-gray-400'}`}
           >
@@ -175,11 +204,18 @@ export default function CalendarView({ projects, events }: CalendarViewProps) {
                     {dayEvents.map((evt) => (
                       <div 
                         key={evt.id} 
-                        className="p-1 rounded text-[8px] font-mono font-bold text-charcoal-950 truncate"
+                        className="p-1 rounded text-[8px] font-mono font-bold text-charcoal-950 truncate flex items-center justify-between group cursor-pointer"
                         style={{ backgroundColor: evt.color || '#d4af37' }}
                         title={evt.title}
+                        onClick={() => {
+                          setEditingEvent(evt);
+                          setEvtTitle(evt.title);
+                          setEvtDate(evt.start);
+                          setEvtType(evt.type || 'delivery');
+                          setEvtColor(evt.color || '#3B82F6');
+                        }}
                       >
-                        {evt.title}
+                        <span className="truncate">{evt.title}</span>
                       </div>
                     ))}
                   </div>
@@ -196,14 +232,38 @@ export default function CalendarView({ projects, events }: CalendarViewProps) {
           
           <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
             {filteredEvents.length > 0 ? (
-              filteredEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()).slice(0, 6).map((evt) => (
+              filteredEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime()).slice(0, 10).map((evt) => (
                 <div 
                   key={evt.id} 
-                  className="p-3 bg-charcoal-950/60 border border-luxury-green-800/10 rounded-xl space-y-1 relative overflow-hidden"
+                  className="p-3 bg-charcoal-950/60 border border-luxury-green-800/10 rounded-xl space-y-1 relative overflow-hidden flex items-center justify-between gap-2 group"
                 >
                   <div className="absolute top-0 left-0 bottom-0 w-1" style={{ backgroundColor: evt.color || '#d4af37' }} />
-                  <span className="text-[8px] font-mono text-gray-500 block uppercase pl-1">{evt.type} • {evt.start}</span>
-                  <h4 className="text-xs font-semibold text-gray-200 truncate pl-1">{evt.title}</h4>
+                  <div className="pl-1 min-w-0 flex-1">
+                    <span className="text-[8px] font-mono text-gray-500 block uppercase">{evt.type} • {evt.start}</span>
+                    <h4 className="text-xs font-semibold text-gray-200 truncate">{evt.title}</h4>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => {
+                        setEditingEvent(evt);
+                        setEvtTitle(evt.title);
+                        setEvtDate(evt.start);
+                        setEvtType(evt.type || 'delivery');
+                        setEvtColor(evt.color || '#3B82F6');
+                      }}
+                      title="Edit Event"
+                      className="p-1 rounded bg-charcoal-800 hover:bg-gold-500/20 text-gold-400 transition-colors cursor-pointer"
+                    >
+                      <Edit className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => setEventToDeleteId(evt.id)}
+                      title="Delete Event"
+                      className="p-1 rounded bg-charcoal-800 hover:bg-red-500/20 text-red-400 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               ))
             ) : (
@@ -212,6 +272,158 @@ export default function CalendarView({ projects, events }: CalendarViewProps) {
           </div>
         </div>
       </div>
+
+      {/* SCHEDULE NEW EVENT MODAL */}
+      {(isAddModalOpen || editingEvent) && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-charcoal-900 border border-gold-500/30 rounded-3xl w-full max-w-md p-6 space-y-4 text-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <h3 className="text-base font-bold font-display text-white flex items-center gap-2">
+                {editingEvent ? <Edit className="w-4 h-4 text-gold-400" /> : <Plus className="w-4 h-4 text-gold-400" />}
+                {editingEvent ? 'Edit Scheduled Event' : 'Schedule New Event'}
+              </h3>
+              <button
+                onClick={() => { setIsAddModalOpen(false); setEditingEvent(null); }}
+                className="text-gray-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!evtTitle || !evtDate) return;
+
+                if (editingEvent && onUpdateEvent) {
+                  await onUpdateEvent(editingEvent.id, {
+                    title: evtTitle,
+                    start: evtDate,
+                    type: evtType,
+                    color: evtColor
+                  });
+                } else if (onAddEvent) {
+                  await onAddEvent({
+                    title: evtTitle,
+                    start: evtDate,
+                    type: evtType,
+                    color: evtColor
+                  });
+                }
+
+                setIsAddModalOpen(false);
+                setEditingEvent(null);
+              }}
+              className="space-y-4 text-xs font-mono"
+            >
+              <div>
+                <label className="text-gray-400 block mb-1">Event Title</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Shoot Day 1 / Trailer Review"
+                  value={evtTitle}
+                  onChange={(e) => setEvtTitle(e.target.value)}
+                  className="w-full bg-charcoal-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-gold-500/50"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-gray-400 block mb-1">Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={evtDate}
+                    onChange={(e) => setEvtDate(e.target.value)}
+                    className="w-full bg-charcoal-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-gold-500/50"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-gray-400 block mb-1">Type</label>
+                  <select
+                    value={evtType}
+                    onChange={(e) => setEvtType(e.target.value as any)}
+                    className="w-full bg-charcoal-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-gold-500/50 cursor-pointer"
+                  >
+                    <option value="delivery">Delivery</option>
+                    <option value="shoot">Shoot</option>
+                    <option value="revision">Revision</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-gray-400 block mb-1">Badge Color</label>
+                <div className="flex items-center gap-3">
+                  {['#10B981', '#3B82F6', '#EF4444', '#F59E0B', '#8B5CF6'].map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setEvtColor(color)}
+                      className={`w-7 h-7 rounded-full transition-all cursor-pointer ${evtColor === color ? 'ring-2 ring-white scale-110' : 'opacity-70'}`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => { setIsAddModalOpen(false); setEditingEvent(null); }}
+                  className="px-4 py-2 rounded-xl text-gray-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-gold-500 hover:bg-gold-400 text-charcoal-950 font-bold rounded-xl shadow-lg"
+                >
+                  {editingEvent ? 'Save Event' : 'Schedule Event'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE EVENT CONFIRMATION MODAL */}
+      {eventToDeleteId && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-charcoal-900 border border-red-500/30 rounded-3xl w-full max-w-sm p-6 space-y-4 text-center text-white">
+            <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center mx-auto text-red-400">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold font-display text-white">Delete Calendar Event</h3>
+              <p className="text-xs text-gray-400 font-mono mt-1">Are you sure you want to delete this event from the timeline calendar?</p>
+            </div>
+            <div className="flex justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setEventToDeleteId(null)}
+                className="px-4 py-2 rounded-xl bg-charcoal-800 text-gray-300 hover:text-white text-xs font-mono font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (onDeleteEvent && eventToDeleteId) {
+                    await onDeleteEvent(eventToDeleteId);
+                  }
+                  setEventToDeleteId(null);
+                }}
+                className="px-5 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl text-xs font-mono shadow-lg cursor-pointer"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
